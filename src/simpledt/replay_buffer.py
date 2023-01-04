@@ -7,6 +7,7 @@ class ReplayBuffer:
     def __init__(
         self,
         max_size: int,
+        rollout_len: int,
         observation_shape: dict,
         action_shape: tuple,
         info_shape: dict,
@@ -18,15 +19,15 @@ class ReplayBuffer:
         self.info_keys = list(info_shape.keys())
         self.info_shapes = list(info_shape.values())
         self.observations = {
-            key: torch.empty((max_size, *shape))
+            key: torch.empty((max_size, rollout_len + 1, *shape))
             for key, shape in observation_shape.items()
         }
-        self.actions = torch.empty((max_size, *action_shape))
-        self.rewards = torch.empty((max_size, 1))
-        self.terminated = torch.empty((max_size, 1), dtype=torch.bool)  # fixed
-        self.truncated = torch.empty((max_size, 1), dtype=torch.bool)  # fixed
+        self.actions = torch.empty((max_size, rollout_len, *action_shape))
+        self.rewards = torch.empty((max_size, rollout_len, 1))
+        self.terminated = torch.empty((max_size, rollout_len, 1), dtype=torch.bool)  # fixed
+        self.truncated = torch.empty((max_size, rollout_len, 1), dtype=torch.bool)  # fixed
         self.info = {
-            key: torch.empty((max_size, *shape)) for key, shape in info_shape.items()
+            key: torch.empty((max_size, rollout_len, *shape)) for key, shape in info_shape.items()
         }
         self.size = 0
         self.current_index = 0

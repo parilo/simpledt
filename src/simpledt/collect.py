@@ -50,8 +50,8 @@ def collect_rollout(env: gym.Env, policy: DTPolicy, max_steps: int) -> Rollout:
         info[key] = torch.cat(info[key], dim=0)
 
     # Concatenate the lists of terminated and truncated into tensors
-    terminated = torch.tensor(terminated)
-    truncated = torch.tensor(truncated)
+    terminated = torch.tensor(terminated).unsqueeze(-1)
+    truncated = torch.tensor(truncated).unsqueeze(-1)
 
     # Create a Rollout object and return it
     rollout = Rollout(
