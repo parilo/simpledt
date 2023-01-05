@@ -26,9 +26,12 @@ def collect_rollout(env: gym.Env, policy: DTPolicy, max_steps: int) -> Rollout:
             actions = policy(observations[:, :-1], reward_to_go, actions)
 
         # Step the environment and store the results
+        actions[0, step] += torch.randn_like(actions[0, step]) * 0.4
+        action_step = actions[0, step].numpy()
         observation, reward, terminated_step, truncated_step, info_step = env.step(
-            actions[0, step].numpy()
+            action_step
         )
+        # print(f'--- action {action_step}')
         observations[:, step + 1, :] = torch.tensor(observation, dtype=torch.float)
         rewards[:, step, 0] = reward
         terminated.append(torch.tensor(terminated_step, dtype=torch.bool))

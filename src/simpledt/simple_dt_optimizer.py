@@ -15,6 +15,13 @@ def calculate_reward_to_go(rewards: torch.Tensor, discount_factor: float) -> tor
     return reward_to_go
 
 
+def normalize_reward_to_go(reward_to_go: torch.Tensor) -> torch.Tensor:
+    """Normalize the reward-to-go values of a batch of sequences."""
+    mean = reward_to_go.mean()
+    std = reward_to_go.std()
+    return (reward_to_go - mean) / (std + 1e-5)
+
+
 class SimpleDTOptimizer:
     def __init__(
         self,
@@ -42,6 +49,7 @@ class SimpleDTOptimizer:
 
         # Get the reward-to-go for each sequence in the batch
         reward_to_go = calculate_reward_to_go(rewards, self.discount_factor)
+        reward_to_go = normalize_reward_to_go(reward_to_go)
 
         # Get the next action predicted by the policy for each sequence
         next_actions = self.policy(observations, reward_to_go, actions)
