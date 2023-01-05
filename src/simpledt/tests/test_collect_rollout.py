@@ -34,5 +34,5 @@ def test_collect_rollout():
     assert rollout.rewards.shape == (max_steps, 1)
 
     # Check that the terminated and truncated flags have the correct shape and values
-    assert rollout.terminated.shape == (max_steps,)
-    assert rollout.truncated.shape == (max_steps,)
+    assert rollout.terminated.shape == (max_steps, 1)
+    assert rollout.truncated.shape == (max_steps, 1)

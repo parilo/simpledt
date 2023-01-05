@@ -7,42 +7,45 @@ from simpledt.rollout import Rollout
 
 
 class TestReplayBuffer(unittest.TestCase):
+
     def setUp(self):
         # Set up test data
         self.observation_shape = {"obs1": (10,), "obs2": (20,)}
         self.action_shape = (5,)
         self.info_shape = {"info1": (7,), "info2": (3,)}
         self.max_size = 3
+        self.rollout_len = 15
         self.batch_size = 2
 
         self.rollout1 = Rollout(
-            observations={"obs1": torch.rand(10), "obs2": torch.rand(20)},
-            actions=torch.rand(5),
-            rewards=torch.rand(1),
-            terminated=torch.rand(1) > 0.5,
-            truncated=torch.rand(1) > 0.5,
-            info={"info1": torch.rand(7), "info2": torch.rand(3)},
+            observations={"obs1": torch.rand(self.rollout_len + 1, 10), "obs2": torch.rand(self.rollout_len + 1, 20)},
+            actions=torch.rand(self.rollout_len, 5),
+            rewards=torch.rand(self.rollout_len, 1),
+            terminated=torch.rand(self.rollout_len, 1) > 0.5,
+            truncated=torch.rand(self.rollout_len, 1) > 0.5,
+            info={"info1": torch.rand(self.rollout_len, 7), "info2": torch.rand(self.rollout_len, 3)},
         )
         self.rollout2 = Rollout(
-            observations={"obs1": torch.rand(10), "obs2": torch.rand(20)},
-            actions=torch.rand(5),
-            rewards=torch.rand(1),
-            terminated=torch.rand(1) > 0.5,
-            truncated=torch.rand(1) > 0.5,
-            info={"info1": torch.rand(7), "info2": torch.rand(3)},
+            observations={"obs1": torch.rand(self.rollout_len + 1, 10), "obs2": torch.rand(self.rollout_len + 1, 20)},
+            actions=torch.rand(self.rollout_len, 5),
+            rewards=torch.rand(self.rollout_len, 1),
+            terminated=torch.rand(self.rollout_len, 1) > 0.5,
+            truncated=torch.rand(self.rollout_len, 1) > 0.5,
+            info={"info1": torch.rand(self.rollout_len, 7), "info2": torch.rand(self.rollout_len, 3)},
         )
         self.rollout3 = Rollout(
-            observations={"obs1": torch.rand(10), "obs2": torch.rand(20)},
-            actions=torch.rand(5),
-            rewards=torch.rand(1),
-            terminated=torch.rand(1) > 0.5,
-            truncated=torch.rand(1) > 0.5,
-            info={"info1": torch.rand(7), "info2": torch.rand(3)},
+            observations={"obs1": torch.rand(self.rollout_len + 1, 10), "obs2": torch.rand(self.rollout_len + 1, 20)},
+            actions=torch.rand(self.rollout_len, 5),
+            rewards=torch.rand(self.rollout_len, 1),
+            terminated=torch.rand(self.rollout_len, 1) > 0.5,
+            truncated=torch.rand(self.rollout_len, 1) > 0.5,
+            info={"info1": torch.rand(self.rollout_len, 7), "info2": torch.rand(self.rollout_len, 3)},
         )
 
         # Initialize replay buffer
         self.replay_buffer = ReplayBuffer(
             max_size=self.max_size,
+            rollout_len=self.rollout_len,
             observation_shape=self.observation_shape,
             action_shape=self.action_shape,
             info_shape=self.info_shape,
@@ -65,14 +68,14 @@ class TestReplayBuffer(unittest.TestCase):
         ) = self.replay_buffer.sample(self.batch_size)
 
         # Check shapes of sampled data
-        self.assertEqual(observations["obs1"].shape, (self.batch_size, 10))
-        self.assertEqual(observations["obs2"].shape, (self.batch_size, 20))
-        self.assertEqual(actions.shape, (self.batch_size, 5))
-        self.assertEqual(rewards.shape, (self.batch_size, 1))
-        self.assertEqual(terminated.shape, (self.batch_size, 1))
-        self.assertEqual(truncated.shape, (self.batch_size, 1))
-        self.assertEqual(info["info1"].shape, (self.batch_size, 7))
-        self.assertEqual(info["info2"].shape, (self.batch_size, 3))
+        self.assertEqual(observations["obs1"].shape, (self.batch_size, self.rollout_len + 1, 10))
+        self.assertEqual(observations["obs2"].shape, (self.batch_size, self.rollout_len + 1, 20))
+        self.assertEqual(actions.shape, (self.batch_size, self.rollout_len, 5))
+        self.assertEqual(rewards.shape, (self.batch_size, self.rollout_len, 1))
+        self.assertEqual(terminated.shape, (self.batch_size, self.rollout_len, 1))
+        self.assertEqual(truncated.shape, (self.batch_size, self.rollout_len, 1))
+        self.assertEqual(info["info1"].shape, (self.batch_size, self.rollout_len, 7))
+        self.assertEqual(info["info2"].shape, (self.batch_size, self.rollout_len, 3))
 
         # Check keys in dictionaries
         self.assertEqual(set(observations.keys()), set(self.observation_shape.keys()))

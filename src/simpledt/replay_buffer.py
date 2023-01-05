@@ -1,6 +1,6 @@
 import torch
 
-from simpledt.rollout import Rollout
+from simpledt.rollout import BatchOfSeq, Rollout
 
 
 class ReplayBuffer:
@@ -55,3 +55,10 @@ class ReplayBuffer:
         truncated = self.truncated[indices]
         info = {key: self.info[key][indices] for key in self.info_keys}
         return observations, actions, rewards, terminated, truncated, info
+
+    def get_content_as_batch_of_seq(self) -> BatchOfSeq:
+        return BatchOfSeq(
+            observations=self.observations,
+            actions=self.actions,
+            rewards=self.rewards,
+        )

@@ -1,9 +1,12 @@
 import argparse
 import gymnasium as gym
-from simpledt.collect import collect_rollout
+import torch.nn as nn
+import torch.optim as optim
 
+from simpledt.collect import collect_rollout
 from simpledt.models.dtpolicy import DTPolicy
 from simpledt.replay_buffer import ReplayBuffer
+from simpledt.simple_dt_optimizer import SimpleDTOptimizer
 
 
 def parse_args():
@@ -13,11 +16,12 @@ def parse_args():
     parser.add_argument("--num-layers", type=int, default=2)
     parser.add_argument("--nhead", type=int, default=4)
     parser.add_argument("--dim-feedforward", type=int, default=32)
-    # parser.add_argument("--output-seq-len", type=int, default=10)
     parser.add_argument("--max-steps", type=int, default=100)
     parser.add_argument("--num-rollouts-per-epoch", type=int, default=10)
-    # parser.add_argument("--max-size", type=int, default=1000)
     parser.add_argument("--num-epochs", type=int, default=1)
+    parser.add_argument("--discount-factor", type=float, default=0.9)
+    parser.add_argument("--learning-rate", type=float, default=3e-4)
+    parser.add_argument("--device", type=str, default="cpu")
     return parser.parse_args()
 
 
@@ -39,7 +43,7 @@ def main():
         dim_feedforward=args.dim_feedforward,
         output_seq_len=args.max_steps,
         batch_first=True,
-        device="cpu",
+        device=args.device,
     )
 
     # Create the replay buffer
@@ -54,12 +58,25 @@ def main():
         info_shape=info_shape,
     )
 
+    simple_dt_optimizer = SimpleDTOptimizer(
+        policy=policy,
+        optimizer=optim.Adam(params=policy.parameters(), lr=args.learning_rate),
+        criterion=nn.MSELoss(),
+        device=args.device,
+        discount_factor=args.discount_factor,
+    )
+
     # Collect rollouts and put them into the replay buffer
     for epoch in range(args.num_epochs):
         for i in range(args.num_rollouts_per_epoch):
             rollout = collect_rollout(env_render if i == 0 else env, policy, args.max_steps)
             rollout.observations = {"observation": rollout.observations}
             replay_buffer.add_rollout(rollout)
+
+        batch = replay_buffer.get_content_as_batch_of_seq()
+        batch.observations = batch.observations["observation"][:, :-1]
+        train_info = simple_dt_optimizer.train_on_batch(batch)
+        print(f'--- epoch {epoch} info {train_info}')
 
 
 if __name__ == "__main__":

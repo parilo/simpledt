@@ -11,3 +11,10 @@ class Rollout:
     terminated: torch.Tensor
     truncated: torch.Tensor
     info: Dict[str, torch.Tensor]  # fixed
+
+
+@dataclass
+class BatchOfSeq:
+    observations: Dict[str, torch.Tensor]
+    actions: torch.Tensor
+    rewards: torch.Tensor
