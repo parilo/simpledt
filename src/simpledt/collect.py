@@ -17,23 +17,29 @@ def collect_rollout(env: gym.Env, policy: DTPolicy, max_steps: int) -> Rollout:
 
     # Initialize the environment and get the first observation
     observation, _ = env.reset()
-    observations[:, 0, :] = torch.tensor(observation, dtype=torch.float)
+    observations[0, 0, :] = torch.tensor(observation, dtype=torch.float)
     reward_to_go = torch.ones(1, max_steps, 1, dtype=torch.float)
 
     for step in range(max_steps):
         # Use the policy to choose an action
         with torch.no_grad():
-            actions = policy(observations[:, :-1], reward_to_go, actions)
+            policy_actions = policy(
+                observations[:, :step + 1],
+                reward_to_go[:, :step + 1],
+                actions[:, :step + 1],
+            )
+            actions[0, step] = policy_actions[0, step]
 
         # Step the environment and store the results
         actions[0, step] += torch.randn_like(actions[0, step]) * 0.4
-        action_step = actions[0, step].numpy()
+        action_step = actions[0, step].cpu().numpy()
         observation, reward, terminated_step, truncated_step, info_step = env.step(
             action_step
         )
-        # print(f'--- action {action_step}')
-        observations[:, step + 1, :] = torch.tensor(observation, dtype=torch.float)
-        rewards[:, step, 0] = reward
+        # if step % 25 == 0:
+        #     print(f'--- action {action_step}')
+        observations[0, step + 1, :] = torch.tensor(observation, dtype=torch.float)
+        rewards[0, step, 0] = reward
         terminated.append(torch.tensor(terminated_step, dtype=torch.bool))
         truncated.append(torch.tensor(truncated_step, dtype=torch.bool))
 

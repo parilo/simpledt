@@ -24,5 +24,6 @@ setup(
     install_requires=[
         "torch>=1.6",
         "numpy>=1.19",
+        "gymnasium",
     ],
 )

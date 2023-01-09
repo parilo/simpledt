@@ -18,3 +18,6 @@ class BatchOfSeq:
     observations: Dict[str, torch.Tensor]
     actions: torch.Tensor
     rewards: torch.Tensor
+    terminated: torch.Tensor = None
+    truncated: torch.Tensor = None
+    info: Dict[str, torch.Tensor] = None  # fixed
