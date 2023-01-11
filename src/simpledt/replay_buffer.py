@@ -56,9 +56,23 @@ class ReplayBuffer:
         # info = {key: self.info[key][indices] for key in self.info_keys}
         return BatchOfSeq(observations, actions, rewards)
 
-    def get_content_as_batch_of_seq(self) -> BatchOfSeq:
+    def get_content(self) -> BatchOfSeq:
         return BatchOfSeq(
             observations=self.observations,
             actions=self.actions,
             rewards=self.rewards,
+            terminated=self.terminated,
+            truncated=self.truncated,
+            info=self.info
         )
+
+    def set_content(self, data: BatchOfSeq):
+        for key in self.observation_keys:
+            self.observations[key][:] = data.observations[key]
+        self.actions[:] = data.actions
+        self.rewards[:] = data.rewards
+        self.terminated[:] = data.terminated
+        self.truncated[:] = data.truncated
+        for key in self.info_keys:
+            self.info[key][:] = data.info[key]
+        self.size = self.actions.shape[0]

@@ -14,7 +14,10 @@ setup(
     # url="https://github.com/janedoe/decisiontransformer",
     packages=["simpledt"],
     package_dir={"": "src"},
-    scripts=["src/bin/train_dt"],
+    scripts=[
+        "src/bin/train_dt",
+        "src/bin/train_cem",
+    ],
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License",

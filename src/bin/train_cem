@@ -1,0 +1,177 @@
+import argparse
+import gymnasium as gym
+import torch
+import torch.nn as nn
+import torch.optim as optim
+
+from simpledt.collect import collect_rollout
+from simpledt.models.cem_policy import CEMPolicy
+from simpledt.models.dtpolicy2 import DTPolicy
+from simpledt.replay_buffer import ReplayBuffer
+from simpledt.rollout import BatchOfSeq
+from simpledt.cem_optimizer import CEMOptimizer, get_best_n_rollouts
+
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--env", type=str, default="Pendulum-v1")
+    parser.add_argument("--hidden-size", type=int, default=64)
+    parser.add_argument("--num-layers", type=int, default=2)
+    parser.add_argument("--nhead", type=int, default=16)
+    parser.add_argument("--dim-feedforward", type=int, default=256)
+    parser.add_argument("--max-steps", type=int, default=100)
+    parser.add_argument("--num-rollouts-per-epoch", type=int, default=500)
+    parser.add_argument("--num-epochs", type=int, default=1)
+    parser.add_argument("--num-train-ops-per-epoch", type=int, default=1)
+    parser.add_argument("--discount-factor", type=float, default=0.99)
+    parser.add_argument("--learning-rate", type=float, default=3e-4)
+    parser.add_argument("--batch-size", type=int, default=32)
+    parser.add_argument("--num-best", type=int, default=50)
+    parser.add_argument("--device", type=str, default="cpu")
+    return parser.parse_args()
+
+
+def collect_rollouts(
+    num_rollouts,
+    env,
+    policy,
+    max_steps,
+    exploration,
+    replay_buffer,
+    print_each=10,
+    print_prefix=''
+):
+    for i in range(num_rollouts):
+        rollout = collect_rollout(env, policy, max_steps, exploration=exploration)
+        rollout.observations = {"observation": rollout.observations}
+        if i % print_each == 0:
+            print(f'--- {print_prefix} rollout {i} reward {rollout.rewards.sum()}')
+        replay_buffer.add_rollout(rollout)
+
+
+def main():
+    # Parse the command-line arguments
+    args = parse_args()
+
+    # Create the environment and the policy
+    env = gym.make(args.env)
+    env_render = gym.make(args.env, render_mode="human")
+    obs_size = env.observation_space.shape[0]
+    action_size = env.action_space.shape[0]
+    policy = CEMPolicy(
+        obs_size,
+        action_size,
+        hidden_size=args.hidden_size,
+        num_layers=args.num_layers,
+        nhead=args.nhead,
+        dim_feedforward=args.dim_feedforward,
+        output_seq_len=args.max_steps,
+        batch_first=True,
+        device=args.device,
+    )
+
+    # Create the replay buffer
+    observation_shape = {"observation": (obs_size,)}
+    action_shape = (action_size,)
+    info_shape = {}
+
+    replay_buffer = ReplayBuffer(
+        max_size=args.num_rollouts_per_epoch,
+        rollout_len=args.max_steps,
+        observation_shape=observation_shape,
+        action_shape=action_shape,
+        info_shape=info_shape,
+    )
+
+    best_replay_buffer = ReplayBuffer(
+        max_size=args.num_best,
+        rollout_len=args.max_steps,
+        observation_shape=observation_shape,
+        action_shape=action_shape,
+        info_shape=info_shape,
+    )
+
+    eval_replay_buffer = ReplayBuffer(
+        max_size=args.num_rollouts_per_epoch,
+        rollout_len=args.max_steps,
+        observation_shape=observation_shape,
+        action_shape=action_shape,
+        info_shape=info_shape,
+    )
+
+    cem_optimizer = CEMOptimizer(
+        policy=policy,
+        optimizer=optim.Adam(params=policy.parameters(), lr=args.learning_rate),
+        criterion=nn.MSELoss(),
+        device=args.device,
+        discount_factor=args.discount_factor,
+    )
+
+    torch.set_printoptions(sci_mode=False)
+
+    # Collect rollouts and put them into the replay buffer
+    for epoch in range(args.num_epochs):
+        if epoch % 10 == 0:
+            # eval_rewards = []
+            # for i in range(args.num_rollouts_per_epoch):
+            #     # used_env = env_render if i == 0 else env
+            #     used_env = env
+            #     rollout = collect_rollout(used_env, policy, args.max_steps, exploration=0)
+            #     eval_rewards.append(rollout.rewards.sum().item())
+            #     if i % 20 == 0:
+            #         print(f'--- eval reward {i} {eval_rewards[-1]}')
+            # eval_rewards_t = torch.sort(torch.tensor(eval_rewards), descending=True)[0]
+            # print(f'--- eval rewards {torch.mean(eval_rewards_t)} {eval_rewards_t}')
+            collect_rollouts(
+                num_rollouts=args.num_rollouts_per_epoch,
+                env=env,
+                policy=policy,
+                max_steps=args.max_steps,
+                exploration=0,
+                replay_buffer=eval_replay_buffer,
+                print_prefix='eval',
+            )
+            eval_rewards_t = torch.sort(eval_replay_buffer.rewards[..., 0].sum(-1), descending=True)[0]
+            print(f'--- eval rewards {torch.mean(eval_rewards_t)} {eval_rewards_t}')
+
+        # for i in range(args.num_rollouts_per_epoch):
+            # used_env = env_render if i == 0 else env
+            # used_env = env
+            # rollout = collect_rollout(used_env, policy, args.max_steps, exploration=0.4)
+            # rollout.observations = {"observation": rollout.observations}
+            # if i % 10 == 0:
+            #     print(f'--- rollout {i} reward {rollout.rewards.sum()}')
+            # replay_buffer.add_rollout(rollout)
+        collect_rollouts(
+            num_rollouts=args.num_rollouts_per_epoch,
+            env=env,
+            policy=policy,
+            max_steps=args.max_steps,
+            exploration=0.4,
+            replay_buffer=replay_buffer,
+            print_prefix=f'epoch {epoch}',
+        )
+
+        all_rollouts = replay_buffer.get_content()
+        best_n = get_best_n_rollouts(args.num_best, all_rollouts)
+        best_replay_buffer.set_content(best_n)
+        print(
+            f'--- rewards {best_n.rewards.sum(1).mean()} '
+            f'/ {all_rollouts.rewards.sum(1).mean()} '
+            f'{best_n.rewards.sum(1)[..., 0]}'
+        )
+
+        # need to do something with edge case in reward to go at the end of seqs
+        for train_op_i in range(args.num_train_ops_per_epoch):
+            batch = best_replay_buffer.sample(args.batch_size)
+            batch.observations = batch.observations["observation"][:, :-1]
+            train_info = cem_optimizer.train_on_batch(batch)
+            if train_op_i % 25 == 0:
+                eval_batch = eval_replay_buffer.sample(args.batch_size)
+                eval_batch.observations = eval_batch.observations["observation"][:, :-1]
+                valid_info = cem_optimizer.validate_on_batch(eval_batch)
+                print(f'--- epoch {epoch} {train_op_i} info {train_info} {valid_info}')
+
+
+if __name__ == "__main__":
+    main()

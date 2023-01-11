@@ -1,11 +1,12 @@
 import gymnasium as gym
 import torch
+import numpy as np
 
 from simpledt.models.dtpolicy import DTPolicy
 from simpledt.rollout import Rollout
 
 
-def collect_rollout(env: gym.Env, policy: DTPolicy, max_steps: int) -> Rollout:
+def collect_rollout(env: gym.Env, policy: DTPolicy, max_steps: int, exploration: float = 0) -> Rollout:
     obs_size = env.observation_space.shape[0]
     action_size = env.action_space.shape[0]
     observations = torch.zeros(1, max_steps + 1, obs_size, dtype=torch.float)
@@ -16,7 +17,10 @@ def collect_rollout(env: gym.Env, policy: DTPolicy, max_steps: int) -> Rollout:
     info = {}
 
     # Initialize the environment and get the first observation
-    observation, _ = env.reset()
+    observation, _ = env.reset(options={
+        'x_init': np.pi / 10,
+        'y_init': 0.01,
+    })
     observations[0, 0, :] = torch.tensor(observation, dtype=torch.float)
     reward_to_go = torch.ones(1, max_steps, 1, dtype=torch.float)
 
@@ -31,7 +35,7 @@ def collect_rollout(env: gym.Env, policy: DTPolicy, max_steps: int) -> Rollout:
             actions[0, step] = policy_actions[0, step]
 
         # Step the environment and store the results
-        actions[0, step] += torch.randn_like(actions[0, step]) * 0.4
+        actions[0, step] += torch.randn_like(actions[0, step]) * exploration
         action_step = actions[0, step].cpu().numpy()
         observation, reward, terminated_step, truncated_step, info_step = env.step(
             action_step
