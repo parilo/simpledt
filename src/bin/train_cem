@@ -3,13 +3,15 @@ import gymnasium as gym
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from torch.utils.tensorboard import SummaryWriter
 
 from simpledt.collect import collect_rollout
-from simpledt.models.cem_policy import CEMPolicy
-from simpledt.models.dtpolicy2 import DTPolicy
+from simpledt.models.mlp_policy import MLPPolicy
+from simpledt.models.transformer_policy import TransformerPolicy
 from simpledt.replay_buffer import ReplayBuffer
 from simpledt.rollout import BatchOfSeq
 from simpledt.cem_optimizer import CEMOptimizer, get_best_n_rollouts
+from simpledt.tb import log_dict_to_tensorboard
 
 
 def parse_args():
@@ -27,6 +29,7 @@ def parse_args():
     parser.add_argument("--learning-rate", type=float, default=3e-4)
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--num-best", type=int, default=50)
+    parser.add_argument("--tb", type=str, default=None)
     parser.add_argument("--device", type=str, default="cpu")
     return parser.parse_args()
 
@@ -58,17 +61,23 @@ def main():
     env_render = gym.make(args.env, render_mode="human")
     obs_size = env.observation_space.shape[0]
     action_size = env.action_space.shape[0]
-    policy = CEMPolicy(
+    policy = MLPPolicy(
         obs_size,
         action_size,
         hidden_size=args.hidden_size,
-        num_layers=args.num_layers,
-        nhead=args.nhead,
-        dim_feedforward=args.dim_feedforward,
-        output_seq_len=args.max_steps,
-        batch_first=True,
         device=args.device,
     )
+    # policy = TransformerPolicy(
+    #     obs_size,
+    #     action_size,
+    #     hidden_size=args.hidden_size,
+    #     num_layers=args.num_layers,
+    #     nhead=args.nhead,
+    #     dim_feedforward=args.dim_feedforward,
+    #     output_seq_len=args.max_steps,
+    #     batch_first=True,
+    #     device=args.device,
+    # )
 
     # Create the replay buffer
     observation_shape = {"observation": (obs_size,)}
@@ -108,20 +117,12 @@ def main():
     )
 
     torch.set_printoptions(sci_mode=False)
+    tb = SummaryWriter(args.tb) if args.tb else None
+    train_step = 0
 
     # Collect rollouts and put them into the replay buffer
     for epoch in range(args.num_epochs):
         if epoch % 10 == 0:
-            # eval_rewards = []
-            # for i in range(args.num_rollouts_per_epoch):
-            #     # used_env = env_render if i == 0 else env
-            #     used_env = env
-            #     rollout = collect_rollout(used_env, policy, args.max_steps, exploration=0)
-            #     eval_rewards.append(rollout.rewards.sum().item())
-            #     if i % 20 == 0:
-            #         print(f'--- eval reward {i} {eval_rewards[-1]}')
-            # eval_rewards_t = torch.sort(torch.tensor(eval_rewards), descending=True)[0]
-            # print(f'--- eval rewards {torch.mean(eval_rewards_t)} {eval_rewards_t}')
             collect_rollouts(
                 num_rollouts=args.num_rollouts_per_epoch,
                 env=env,
@@ -132,16 +133,10 @@ def main():
                 print_prefix='eval',
             )
             eval_rewards_t = torch.sort(eval_replay_buffer.rewards[..., 0].sum(-1), descending=True)[0]
-            print(f'--- eval rewards {torch.mean(eval_rewards_t)} {eval_rewards_t}')
+            mean_eval_rewards = torch.mean(eval_rewards_t).item()
+            log_dict_to_tensorboard({'mean_reward': {'eval_mean': mean_eval_rewards}}, epoch, tb)
+            print(f'--- eval rewards {mean_eval_rewards} {eval_rewards_t}')
 
-        # for i in range(args.num_rollouts_per_epoch):
-            # used_env = env_render if i == 0 else env
-            # used_env = env
-            # rollout = collect_rollout(used_env, policy, args.max_steps, exploration=0.4)
-            # rollout.observations = {"observation": rollout.observations}
-            # if i % 10 == 0:
-            #     print(f'--- rollout {i} reward {rollout.rewards.sum()}')
-            # replay_buffer.add_rollout(rollout)
         collect_rollouts(
             num_rollouts=args.num_rollouts_per_epoch,
             env=env,
@@ -155,22 +150,33 @@ def main():
         all_rollouts = replay_buffer.get_content()
         best_n = get_best_n_rollouts(args.num_best, all_rollouts)
         best_replay_buffer.set_content(best_n)
+        mean_best = best_n.rewards.sum(1).mean()
+        mean_all = all_rollouts.rewards.sum(1).mean()
+        log_dict_to_tensorboard({
+            'mean_reward': {
+                'train_best_mean': mean_best,
+                'train_all_mean': mean_all,
+            }
+        }, epoch, tb)
         print(
-            f'--- rewards {best_n.rewards.sum(1).mean()} '
-            f'/ {all_rollouts.rewards.sum(1).mean()} '
+            f'--- rewards {mean_best} / {mean_all} '
             f'{best_n.rewards.sum(1)[..., 0]}'
         )
 
         # need to do something with edge case in reward to go at the end of seqs
-        for train_op_i in range(args.num_train_ops_per_epoch):
+        for _ in range(args.num_train_ops_per_epoch):
             batch = best_replay_buffer.sample(args.batch_size)
             batch.observations = batch.observations["observation"][:, :-1]
             train_info = cem_optimizer.train_on_batch(batch)
-            if train_op_i % 25 == 0:
+            if train_step % 25 == 0:
                 eval_batch = eval_replay_buffer.sample(args.batch_size)
                 eval_batch.observations = eval_batch.observations["observation"][:, :-1]
                 valid_info = cem_optimizer.validate_on_batch(eval_batch)
-                print(f'--- epoch {epoch} {train_op_i} info {train_info} {valid_info}')
+                if tb:
+                    log_dict_to_tensorboard(train_info, train_step, tb)
+                    log_dict_to_tensorboard(valid_info, train_step, tb)
+                print(f'--- epoch {epoch} {train_step} info {train_info} {valid_info}')
+            train_step += 1
 
 
 if __name__ == "__main__":
