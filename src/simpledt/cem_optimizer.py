@@ -27,13 +27,11 @@ class CEMOptimizer:
         optimizer: optim.Optimizer,
         criterion: nn.Module,
         device: torch.device,
-        discount_factor: float,
     ):
         self.policy = policy
         self.optimizer = optimizer
         self.criterion = criterion
         self.device = device
-        self.discount_factor = discount_factor
 
     def _calc_loss(self, batch: BatchOfSeq) -> torch.Tensor:
         observations = batch.observations
@@ -43,7 +41,14 @@ class CEMOptimizer:
         observations = observations.to(self.device)
         actions = actions.to(self.device)
 
-        next_actions = self.policy(observations)
+        observations = observations.reshape(-1, 1, observations.shape[-1])
+        actions = actions.reshape(-1, 1, actions.shape[-1])
+
+        next_actions = self.policy(
+            observations=observations,
+            reward_to_go=None,
+            actions=actions,
+        )
 
         # Compute the loss
         return self.criterion(next_actions, actions)

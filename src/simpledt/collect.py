@@ -6,7 +6,13 @@ from simpledt.models.dtpolicy import DTPolicy
 from simpledt.rollout import Rollout
 
 
-def collect_rollout(env: gym.Env, policy: DTPolicy, max_steps: int, exploration: float = 0) -> Rollout:
+def collect_rollout(
+    env: gym.Env,
+    policy: DTPolicy,
+    max_steps: int,
+    history_steps: int = 1,
+    exploration: float = 0,
+) -> Rollout:
     obs_size = env.observation_space.shape[0]
     action_size = env.action_space.shape[0]
     observations = torch.zeros(1, max_steps + 1, obs_size, dtype=torch.float)
@@ -27,12 +33,18 @@ def collect_rollout(env: gym.Env, policy: DTPolicy, max_steps: int, exploration:
     for step in range(max_steps):
         # Use the policy to choose an action
         with torch.no_grad():
+            start_ind = max(step - history_steps + 1, 0)
+
+            end_ind = step + 1
+            # print(f'--- observations[:, start_ind:end_ind] {observations[:, start_ind:end_ind].shape}')
+            # print(f'--- reward_to_go[:, start_ind:end_ind] {reward_to_go[:, start_ind:end_ind].shape}')
+            # print(f'--- actions[:, start_ind:end_ind] {actions[:, start_ind:end_ind].shape}')
             policy_actions = policy(
-                observations[:, :step + 1],
-                reward_to_go[:, :step + 1],
-                actions[:, :step + 1],
+                observations[:, start_ind:end_ind],
+                reward_to_go[:, start_ind:end_ind],
+                actions[:, start_ind:end_ind],
             )
-            actions[0, step] = policy_actions[0, step]
+            actions[0, step] = policy_actions[0, history_steps - 1]
 
         # Step the environment and store the results
         actions[0, step] += torch.randn_like(actions[0, step]) * exploration

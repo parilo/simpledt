@@ -1,4 +1,5 @@
 import argparse
+import time
 import gymnasium as gym
 import torch
 import torch.nn as nn
@@ -17,18 +18,19 @@ from simpledt.tb import log_dict_to_tensorboard
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--env", type=str, default="Pendulum-v1")
-    parser.add_argument("--hidden-size", type=int, default=64)
+    parser.add_argument("--hidden-size", type=int, default=32)
     parser.add_argument("--num-layers", type=int, default=2)
-    parser.add_argument("--nhead", type=int, default=16)
-    parser.add_argument("--dim-feedforward", type=int, default=256)
-    parser.add_argument("--max-steps", type=int, default=100)
-    parser.add_argument("--num-rollouts-per-epoch", type=int, default=500)
-    parser.add_argument("--num-epochs", type=int, default=1)
-    parser.add_argument("--num-train-ops-per-epoch", type=int, default=1)
-    parser.add_argument("--discount-factor", type=float, default=0.99)
+    parser.add_argument("--nhead", type=int, default=2)
+    parser.add_argument("--dim-feedforward", type=int, default=32)
+    parser.add_argument("--max-steps", type=int, default=200)
+    parser.add_argument("--num-rollouts-per-epoch", type=int, default=200)
+    parser.add_argument("--num-eval-rollouts-per-epoch", type=int, default=20)
+    parser.add_argument("--num-epochs", type=int, default=1000)
+    parser.add_argument("--num-train-ops-per-epoch", type=int, default=200)
     parser.add_argument("--learning-rate", type=float, default=3e-4)
-    parser.add_argument("--batch-size", type=int, default=32)
-    parser.add_argument("--num-best", type=int, default=50)
+    parser.add_argument("--batch-size", type=int, default=20)
+    parser.add_argument("--num-best", type=int, default=20)
+    parser.add_argument("--policy-type", type=str, default="transformer")
     parser.add_argument("--tb", type=str, default=None)
     parser.add_argument("--device", type=str, default="cpu")
     return parser.parse_args()
@@ -44,11 +46,19 @@ def collect_rollouts(
     print_each=10,
     print_prefix=''
 ):
+    t1 = time.time()
     for i in range(num_rollouts):
-        rollout = collect_rollout(env, policy, max_steps, exploration=exploration)
+        rollout = collect_rollout(
+            env=env,
+            policy=policy,
+            max_steps=max_steps,
+            exploration=exploration
+        )
         rollout.observations = {"observation": rollout.observations}
         if i % print_each == 0:
-            print(f'--- {print_prefix} rollout {i} reward {rollout.rewards.sum()}')
+            t2 = time.time()
+            print(f'--- {print_prefix} rollout {i} {t2 - t1} reward {rollout.rewards.sum()}')
+            t1 = t2
         replay_buffer.add_rollout(rollout)
 
 
@@ -61,23 +71,27 @@ def main():
     env_render = gym.make(args.env, render_mode="human")
     obs_size = env.observation_space.shape[0]
     action_size = env.action_space.shape[0]
-    policy = MLPPolicy(
-        obs_size,
-        action_size,
-        hidden_size=args.hidden_size,
-        device=args.device,
-    )
-    # policy = TransformerPolicy(
-    #     obs_size,
-    #     action_size,
-    #     hidden_size=args.hidden_size,
-    #     num_layers=args.num_layers,
-    #     nhead=args.nhead,
-    #     dim_feedforward=args.dim_feedforward,
-    #     output_seq_len=args.max_steps,
-    #     batch_first=True,
-    #     device=args.device,
-    # )
+    if args.policy_type == "mlp":
+        policy = MLPPolicy(
+            obs_size,
+            action_size,
+            hidden_size=args.hidden_size,
+            device=args.device,
+        )
+    elif args.policy_type == "transformer":
+        policy = TransformerPolicy(
+            obs_size,
+            action_size,
+            hidden_size=args.hidden_size,
+            num_layers=args.num_layers,
+            nhead=args.nhead,
+            dim_feedforward=args.dim_feedforward,
+            output_seq_len=args.max_steps,
+            batch_first=True,
+            device=args.device,
+        )
+    else:
+        raise RuntimeError(f"policy type {args.policy_type} is not supported")
 
     # Create the replay buffer
     observation_shape = {"observation": (obs_size,)}
@@ -101,7 +115,7 @@ def main():
     )
 
     eval_replay_buffer = ReplayBuffer(
-        max_size=args.num_rollouts_per_epoch,
+        max_size=args.num_eval_rollouts_per_epoch,
         rollout_len=args.max_steps,
         observation_shape=observation_shape,
         action_shape=action_shape,
@@ -113,7 +127,6 @@ def main():
         optimizer=optim.Adam(params=policy.parameters(), lr=args.learning_rate),
         criterion=nn.MSELoss(),
         device=args.device,
-        discount_factor=args.discount_factor,
     )
 
     torch.set_printoptions(sci_mode=False)
@@ -124,7 +137,7 @@ def main():
     for epoch in range(args.num_epochs):
         if epoch % 10 == 0:
             collect_rollouts(
-                num_rollouts=args.num_rollouts_per_epoch,
+                num_rollouts=args.num_eval_rollouts_per_epoch,
                 env=env,
                 policy=policy,
                 max_steps=args.max_steps,
