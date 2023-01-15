@@ -29,7 +29,9 @@ def normalize_reward_to_go(reward_to_go: torch.Tensor) -> torch.Tensor:
     return (reward_to_go - rmin) / (rmax - rmin + 1e-5)
 
 
-def calculate_reward_to_go(rewards: torch.Tensor, discount_factor: float) -> torch.Tensor:
+def calculate_reward_to_go(
+    rewards: torch.Tensor, discount_factor: float
+) -> torch.Tensor:
     reward_to_go = rewards.clone()
     reward_to_go[:] = reward_to_go.sum(dim=1).unsqueeze(dim=1)
     return reward_to_go
@@ -129,10 +131,12 @@ class SimpleDTOptimizer:
 
         if debug:
             import numpy
+
             numpy.set_printoptions(suppress=True)
-            print(f'--- best mean {rollout_rewards[inds].mean()} / {rollout_rewards.mean()} '
-                f'rewards {rollout_rewards[inds].cpu().numpy()} '
-                f'rewards norm {rollout_rewards_norm[inds].cpu().numpy()} '
+            print(
+                f"--- best mean {rollout_rewards[inds].mean()} / {rollout_rewards.mean()} "
+                f"rewards {rollout_rewards[inds].cpu().numpy()} "
+                f"rewards norm {rollout_rewards_norm[inds].cpu().numpy()} "
             )
 
         next_actions = self.policy(observations, reward_to_go_norm, actions)
@@ -146,7 +150,7 @@ class SimpleDTOptimizer:
         self.optimizer.step()
 
         return {
-            'dt_loss': loss.item(),
+            "dt_loss": loss.item(),
             # 'reward_to_go_mean': reward_to_go.mean(),
             # 'reward_to_go_std': reward_to_go.std(),
         }

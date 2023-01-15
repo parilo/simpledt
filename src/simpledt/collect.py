@@ -23,10 +23,12 @@ def collect_rollout(
     info = {}
 
     # Initialize the environment and get the first observation
-    observation, _ = env.reset(options={
-        'x_init': np.pi / 10,
-        'y_init': 0.01,
-    })
+    observation, _ = env.reset(
+        options={
+            "x_init": np.pi / 10,
+            "y_init": 0.01,
+        }
+    )
     observations[0, 0, :] = torch.tensor(observation, dtype=torch.float)
     reward_to_go = torch.ones(1, max_steps, 1, dtype=torch.float)
 

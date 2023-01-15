@@ -61,8 +61,12 @@ class DTPolicy(nn.Module):
         actions: torch.Tensor,
     ) -> torch.Tensor:
         # Add first zero step
-        observations = torch.cat([torch.zeros_like(observations[:, 0:1]), observations], dim=1)
-        reward_to_go = torch.cat([torch.zeros_like(reward_to_go[:, 0:1]), reward_to_go], dim=1)
+        observations = torch.cat(
+            [torch.zeros_like(observations[:, 0:1]), observations], dim=1
+        )
+        reward_to_go = torch.cat(
+            [torch.zeros_like(reward_to_go[:, 0:1]), reward_to_go], dim=1
+        )
         actions = torch.cat([torch.zeros_like(actions[:, 0:1]), actions], dim=1)
 
         # Convert observations and reward_to_go to tensors and move to the device
@@ -76,9 +80,9 @@ class DTPolicy(nn.Module):
 
         # Add positional encoding to the input
         seq_len = observations.shape[1]
-        pos_enc = self.pos_encoding(torch.arange(seq_len, dtype=torch.long).to(self.device)).to(
-            self.device
-        )
+        pos_enc = self.pos_encoding(
+            torch.arange(seq_len, dtype=torch.long).to(self.device)
+        ).to(self.device)
 
         # Use the transformer to process the input
         # print(f'--- x {x.shape} pos enc {pos_enc.shape} mask {self._src_mask.shape}')

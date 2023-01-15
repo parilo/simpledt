@@ -24,10 +24,15 @@ class ReplayBuffer:
         }
         self.actions = torch.empty((max_size, rollout_len, *action_shape))
         self.rewards = torch.empty((max_size, rollout_len, 1))
-        self.terminated = torch.empty((max_size, rollout_len, 1), dtype=torch.bool)  # fixed
-        self.truncated = torch.empty((max_size, rollout_len, 1), dtype=torch.bool)  # fixed
+        self.terminated = torch.empty(
+            (max_size, rollout_len, 1), dtype=torch.bool
+        )  # fixed
+        self.truncated = torch.empty(
+            (max_size, rollout_len, 1), dtype=torch.bool
+        )  # fixed
         self.info = {
-            key: torch.empty((max_size, rollout_len, *shape)) for key, shape in info_shape.items()
+            key: torch.empty((max_size, rollout_len, *shape))
+            for key, shape in info_shape.items()
         }
         self.size = 0
         self.current_index = 0
@@ -63,7 +68,7 @@ class ReplayBuffer:
             rewards=self.rewards,
             terminated=self.terminated,
             truncated=self.truncated,
-            info=self.info
+            info=self.info,
         )
 
     def set_content(self, data: BatchOfSeq):

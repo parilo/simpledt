@@ -6,6 +6,7 @@ from simpledt.models.dtpolicy import DTPolicy
 from simpledt.rollout import BatchOfSeq
 from simpledt.simple_dt_optimizer import SimpleDTOptimizer
 
+
 def test_simple_dt_optimizer():
     # Create a dummy DTPolicy and optimizer
     obs_size = 10
@@ -46,5 +47,4 @@ def test_simple_dt_optimizer():
     train_info = optimizer.train_on_batch(batch)
 
     # Check if the output is a scalar tensor
-    assert isinstance(train_info['dt_loss'], float)
-
+    assert isinstance(train_info["dt_loss"], float)

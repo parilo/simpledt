@@ -7,7 +7,6 @@ from simpledt.rollout import Rollout
 
 
 class TestReplayBuffer(unittest.TestCase):
-
     def setUp(self):
         # Set up test data
         self.observation_shape = {"obs1": (10,), "obs2": (20,)}
@@ -18,28 +17,46 @@ class TestReplayBuffer(unittest.TestCase):
         self.batch_size = 2
 
         self.rollout1 = Rollout(
-            observations={"obs1": torch.rand(self.rollout_len + 1, 10), "obs2": torch.rand(self.rollout_len + 1, 20)},
+            observations={
+                "obs1": torch.rand(self.rollout_len + 1, 10),
+                "obs2": torch.rand(self.rollout_len + 1, 20),
+            },
             actions=torch.rand(self.rollout_len, 5),
             rewards=torch.rand(self.rollout_len, 1),
             terminated=torch.rand(self.rollout_len, 1) > 0.5,
             truncated=torch.rand(self.rollout_len, 1) > 0.5,
-            info={"info1": torch.rand(self.rollout_len, 7), "info2": torch.rand(self.rollout_len, 3)},
+            info={
+                "info1": torch.rand(self.rollout_len, 7),
+                "info2": torch.rand(self.rollout_len, 3),
+            },
         )
         self.rollout2 = Rollout(
-            observations={"obs1": torch.rand(self.rollout_len + 1, 10), "obs2": torch.rand(self.rollout_len + 1, 20)},
+            observations={
+                "obs1": torch.rand(self.rollout_len + 1, 10),
+                "obs2": torch.rand(self.rollout_len + 1, 20),
+            },
             actions=torch.rand(self.rollout_len, 5),
             rewards=torch.rand(self.rollout_len, 1),
             terminated=torch.rand(self.rollout_len, 1) > 0.5,
             truncated=torch.rand(self.rollout_len, 1) > 0.5,
-            info={"info1": torch.rand(self.rollout_len, 7), "info2": torch.rand(self.rollout_len, 3)},
+            info={
+                "info1": torch.rand(self.rollout_len, 7),
+                "info2": torch.rand(self.rollout_len, 3),
+            },
         )
         self.rollout3 = Rollout(
-            observations={"obs1": torch.rand(self.rollout_len + 1, 10), "obs2": torch.rand(self.rollout_len + 1, 20)},
+            observations={
+                "obs1": torch.rand(self.rollout_len + 1, 10),
+                "obs2": torch.rand(self.rollout_len + 1, 20),
+            },
             actions=torch.rand(self.rollout_len, 5),
             rewards=torch.rand(self.rollout_len, 1),
             terminated=torch.rand(self.rollout_len, 1) > 0.5,
             truncated=torch.rand(self.rollout_len, 1) > 0.5,
-            info={"info1": torch.rand(self.rollout_len, 7), "info2": torch.rand(self.rollout_len, 3)},
+            info={
+                "info1": torch.rand(self.rollout_len, 7),
+                "info2": torch.rand(self.rollout_len, 3),
+            },
         )
 
         # Initialize replay buffer
@@ -68,8 +85,12 @@ class TestReplayBuffer(unittest.TestCase):
         ) = self.replay_buffer.sample(self.batch_size)
 
         # Check shapes of sampled data
-        self.assertEqual(observations["obs1"].shape, (self.batch_size, self.rollout_len + 1, 10))
-        self.assertEqual(observations["obs2"].shape, (self.batch_size, self.rollout_len + 1, 20))
+        self.assertEqual(
+            observations["obs1"].shape, (self.batch_size, self.rollout_len + 1, 10)
+        )
+        self.assertEqual(
+            observations["obs2"].shape, (self.batch_size, self.rollout_len + 1, 20)
+        )
         self.assertEqual(actions.shape, (self.batch_size, self.rollout_len, 5))
         self.assertEqual(rewards.shape, (self.batch_size, self.rollout_len, 1))
         self.assertEqual(terminated.shape, (self.batch_size, self.rollout_len, 1))

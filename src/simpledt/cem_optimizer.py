@@ -7,7 +7,7 @@ from simpledt.models.dtpolicy import DTPolicy
 from simpledt.rollout import BatchOfSeq
 
 
-def get_best_n_rollouts(num:int, rollouts: BatchOfSeq) -> BatchOfSeq:
+def get_best_n_rollouts(num: int, rollouts: BatchOfSeq) -> BatchOfSeq:
     r_rewards = rollouts.rewards.sum(1)[..., 0]
     inds = torch.argsort(r_rewards, descending=True)[:num]
     return BatchOfSeq(
@@ -64,8 +64,8 @@ class CEMOptimizer:
         self.optimizer.step()
 
         return {
-            'cem_loss': {
-                'train': loss.item(),
+            "cem_loss": {
+                "train": loss.item(),
             }
         }
 
@@ -76,7 +76,7 @@ class CEMOptimizer:
             loss = self._calc_loss(batch)
 
         return {
-            'cem_loss': {
-                'valid': loss.item(),
+            "cem_loss": {
+                "valid": loss.item(),
             }
         }
