@@ -22,19 +22,19 @@ from simpledt.rollout import BatchOfSeq
 #     return (reward_to_go - mean) / (std + 1e-5)
 
 
-def normalize_reward_to_go(reward_to_go: torch.Tensor) -> torch.Tensor:
-    """Normalize the reward-to-go values of a batch of sequences."""
-    rmax = reward_to_go.max()
-    rmin = reward_to_go.min()
-    return (reward_to_go - rmin) / (rmax - rmin + 1e-5)
+# def normalize_reward_to_go(reward_to_go: torch.Tensor) -> torch.Tensor:
+#     """Normalize the reward-to-go values of a batch of sequences."""
+#     rmax = reward_to_go.max()
+#     rmin = reward_to_go.min()
+#     return (reward_to_go - rmin) / (rmax - rmin + 1e-5)
 
 
-def calculate_reward_to_go(
-    rewards: torch.Tensor, discount_factor: float
-) -> torch.Tensor:
-    reward_to_go = rewards.clone()
-    reward_to_go[:] = reward_to_go.sum(dim=1).unsqueeze(dim=1)
-    return reward_to_go
+# def calculate_reward_to_go(
+#     rewards: torch.Tensor, discount_factor: float
+# ) -> torch.Tensor:
+#     reward_to_go = rewards.clone()
+#     reward_to_go[:] = reward_to_go.sum(dim=1).unsqueeze(dim=1)
+#     return reward_to_go
 
 
 # def normalize_reward_to_go(reward_to_go: torch.Tensor, debug=False) -> torch.Tensor:
@@ -52,6 +52,11 @@ def calculate_reward_to_go(
 #     #     torch.zeros_like(reward_to_go)
 #     # )
 #     return reward_to_go
+
+
+def calc_reward_to_go(rewards: torch.Tensor):
+    reward_to_go = torch.flip(torch.cumsum(torch.flip(rewards, [1]), 1), [1])
+    return reward_to_go
 
 
 class SimpleDTOptimizer:
@@ -80,7 +85,7 @@ class SimpleDTOptimizer:
         rewards = rewards.to(self.device)
 
         # Get the reward-to-go for each sequence in the batch
-        reward_to_go = calculate_reward_to_go(rewards, self.discount_factor)
+        reward_to_go = calc_reward_to_go(rewards)
 
         # use only first part
         # observations = observations[:, :100]
@@ -88,7 +93,7 @@ class SimpleDTOptimizer:
         # rewards = rewards[:, :100]
         # reward_to_go = reward_to_go[:, :100]
 
-        reward_to_go_norm = normalize_reward_to_go(reward_to_go)
+        # reward_to_go_norm = normalize_reward_to_go(reward_to_go)
 
         # Get the next action predicted by the policy for each sequence
         # if debug:
@@ -123,23 +128,23 @@ class SimpleDTOptimizer:
         # actions = actions[inds]
 
         # RCBC
-        rollout_rewards = reward_to_go[:, 0, 0]
-        rollout_rewards_norm = reward_to_go_norm[:, 0, 0]
-        inds = torch.argsort(rollout_rewards, descending=True)
+        # rollout_rewards = reward_to_go[:, 0, 0]
+        # rollout_rewards_norm = reward_to_go_norm[:, 0, 0]
+        # inds = torch.argsort(rollout_rewards, descending=True)
         # best_roll_num = int(0.1 * observations.shape[0])
         # inds = inds[:best_roll_num]
 
-        if debug:
-            import numpy
+        # if debug:
+        #     import numpy
 
-            numpy.set_printoptions(suppress=True)
-            print(
-                f"--- best mean {rollout_rewards[inds].mean()} / {rollout_rewards.mean()} "
-                f"rewards {rollout_rewards[inds].cpu().numpy()} "
-                f"rewards norm {rollout_rewards_norm[inds].cpu().numpy()} "
-            )
+        #     numpy.set_printoptions(suppress=True)
+        #     print(
+        #         f"--- best mean {rollout_rewards[inds].mean()} / {rollout_rewards.mean()} "
+        #         f"rewards {rollout_rewards[inds].cpu().numpy()} "
+        #         f"rewards norm {rollout_rewards_norm[inds].cpu().numpy()} "
+        #     )
 
-        next_actions = self.policy(observations, reward_to_go_norm, actions)
+        # next_actions = self.policy(observations, reward_to_go_norm, actions)
 
         # Compute the loss
         loss = self.criterion(next_actions, actions)

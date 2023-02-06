@@ -10,7 +10,6 @@ from simpledt.collect import collect_rollout
 from simpledt.models.mlp_policy import MLPPolicy
 from simpledt.models.transformer_policy import TransformerPolicy
 from simpledt.replay_buffer import ReplayBuffer
-from simpledt.rollout import BatchOfSeq
 from simpledt.cem_optimizer import CEMOptimizer, get_best_n_rollouts
 from simpledt.tb import log_dict_to_tensorboard
 

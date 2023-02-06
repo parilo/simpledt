@@ -61,6 +61,17 @@ class ReplayBuffer:
         # info = {key: self.info[key][indices] for key in self.info_keys}
         return BatchOfSeq(observations, actions, rewards)
 
+    def sample_seqs(self, batch_size: int, seqlen: int):
+        indices = torch.randint(0, self.size, (batch_size,))
+        start_ind = torch.randint(0, self.observations[self.observation_keys[0]].shape[1] - seqlen, (batch_size,))
+        observations = {
+            key: self.observations[key][indices, start_ind:start_ind + seqlen + 1, :]
+            for key in self.observation_keys
+        }
+        actions = self.actions[indices, start_ind:start_ind + seqlen, :]
+        rewards = self.rewards[indices, start_ind:start_ind + seqlen, :]
+        return BatchOfSeq(observations, actions, rewards)
+
     def get_content(self) -> BatchOfSeq:
         return BatchOfSeq(
             observations=self.observations,

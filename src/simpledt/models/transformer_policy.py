@@ -45,7 +45,7 @@ class TransformerPolicy(nn.Module):
         # self.pos_encoding = nn.Embedding(self.output_seq_len + 1, self.hidden_size).to(
         #     self.device
         # )
-        self.input_fc = nn.Linear(self.obs_size, self.hidden_size).to(self.device)
+        self.observation_fc = nn.Linear(self.obs_size, self.hidden_size).to(self.device)
         self.output_fc = nn.Linear(self.hidden_size, self.action_size).to(self.device)
         self.action_fc = nn.Linear(self.action_size, self.hidden_size).to(self.device)
         self._tgt_mask = generate_square_subsequent_mask(self.output_seq_len + 1, 1).to(
@@ -66,7 +66,7 @@ class TransformerPolicy(nn.Module):
         actions = actions.to(self.device)
 
         # Make tokens
-        inp_tok = self.input_fc(observations)
+        obs_tok = self.observation_fc(observations)
         actions_tok = self.action_fc(actions)
 
         # Add positional encoding to the input
@@ -78,7 +78,7 @@ class TransformerPolicy(nn.Module):
         # Use the transformer to process the input
         out_tok = self.transformer.decoder(
             tgt=actions_tok,
-            memory=inp_tok,
+            memory=obs_tok,
             tgt_mask=self._tgt_mask[:seq_len, :seq_len],
             memory_mask=self._tgt_mask[:seq_len, :seq_len],
         )

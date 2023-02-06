@@ -1,5 +1,11 @@
 Code mostly generated with ChatGPT
 
+Install
+```
+cd simpledt
+pip install -e .
+```
+
 Transformer policy CEM
 ```
 train_cem --num-epochs 1000 --num-rollouts-per-epoch 200 --num-eval-rollouts-per-epoch 20 --device cuda:0  --num-train-ops-per-epoch 200  --max-steps 200 --learning-rate 3e-4 --batch-size 20 --num-best 20 --tb ./tb/tns6
