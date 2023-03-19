@@ -1,23 +1,11 @@
 from typing import Dict, List
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 
-from simpledt.models.dtpolicy import DTPolicy
+from simpledt.models.transformer_decoder import TransformerDecoderPolicy
 from simpledt.rollout import BatchOfSeq, Rollout
-
-
-def get_best_n_rollouts(num: int, rollouts: BatchOfSeq) -> BatchOfSeq:
-    r_rewards = rollouts.rewards.sum(1)[..., 0]
-    inds = torch.argsort(r_rewards, descending=True)[:num]
-    return BatchOfSeq(
-        observations={key: val[inds] for key, val in rollouts.observations.items()},
-        actions=rollouts.actions[inds],
-        rewards=rollouts.rewards[inds],
-        terminated=rollouts.terminated[inds],
-        truncated=rollouts.truncated[inds],
-        info={key: val[inds] for key, val in rollouts.info.items()},
-    )
 
 
 def get_best_n_rollouts_list(num: int, rollouts: List[Rollout]) -> List[Rollout]:
@@ -30,17 +18,15 @@ def get_best_n_rollouts_list(num: int, rollouts: List[Rollout]) -> List[Rollout]
     return sorted_rollouts[:num]
 
 
-class CEMOptimizer:
+class TransformerCEMOptimizer:
     def __init__(
         self,
-        policy: DTPolicy,
+        policy: TransformerDecoderPolicy,
         optimizer: optim.Optimizer,
-        criterion: nn.Module,
         device: torch.device,
     ):
         self.policy = policy
         self.optimizer = optimizer
-        self.criterion = criterion
         self.device = device
 
     def _calc_loss(self, batch: BatchOfSeq) -> torch.Tensor:
@@ -51,17 +37,25 @@ class CEMOptimizer:
         observations = observations.to(self.device)
         actions = actions.to(self.device)
 
-        observations = observations.reshape(-1, 1, observations.shape[-1])
-        actions = actions.reshape(-1, 1, actions.shape[-1])
+        # print(f'--- observations {observations.shape} actions {actions.shape}')
 
-        next_actions = self.policy(
+        policy_output = self.policy(
             observations=observations,
-            reward_to_go=None,
-            actions=actions,
+            actions=actions[:, :-1],
         )
 
-        # Compute the loss
-        return self.criterion(next_actions, actions)
+        next_actions = policy_output[:, ::2]
+
+        targets = actions.argmax(-1)
+        # print(targets)
+        # print(next_actions)
+        next_actions_reshaped = next_actions.reshape(-1, next_actions.shape[-1])
+        targets = targets.reshape(-1)
+        # print(f'--- next_actions {next_actions.shape} next_actions_reshaped {next_actions_reshaped.shape} targets {targets.shape}')
+
+        random_targets = torch.randint_like(targets, 12)
+        ce_loss = F.cross_entropy(next_actions_reshaped, targets) + 0.1 * F.cross_entropy(next_actions_reshaped, random_targets)
+        return ce_loss
 
     def train_on_batch(self, batch: BatchOfSeq) -> Dict[str, float]:
 
@@ -74,7 +68,7 @@ class CEMOptimizer:
         self.optimizer.step()
 
         return {
-            "cem_loss": {
+            "ce_loss": {
                 "train": loss.item(),
             }
         }
@@ -86,7 +80,7 @@ class CEMOptimizer:
             loss = self._calc_loss(batch)
 
         return {
-            "cem_loss": {
+            "ce_loss": {
                 "valid": loss.item(),
             }
         }

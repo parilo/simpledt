@@ -11,6 +11,8 @@ class Rollout:
     terminated: torch.Tensor
     truncated: torch.Tensor
     info: Dict[str, torch.Tensor]  # fixed
+    size: int
+    total_reward: float
 
 
 @dataclass

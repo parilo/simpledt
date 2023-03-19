@@ -1,0 +1,344 @@
+import argparse
+import time
+import gymnasium as gym
+import cv2
+import numpy as np
+
+from typing import Any, List, Tuple
+
+import torch
+from torch.utils.tensorboard import SummaryWriter
+from simpledt.cem_optimizer import get_best_n_rollouts_list
+from simpledt.cem_optimizer_transformer import TransformerCEMOptimizer
+from simpledt.collect2 import collect_rollout
+from simpledt.models.transformer_decoder import TransformerDecoderPolicy
+from simpledt.replay_buffer import ReplayBuffer
+from simpledt.wrappers.flatten_obs_wrapper import FlattenImageObservationWrapper
+from simpledt.wrappers.resize_obs_wrapper import ResizeObservationWrapper
+from simpledt.wrappers.scale_obs_wrapper import ScaleObservationWrapper
+
+# import torch.nn as nn
+import torch.optim as optim
+
+from simpledt.rollout import Rollout
+from simpledt.tb import log_dict_to_tensorboard
+
+# from simpledt.collect import collect_rollout
+# from simpledt.models.dtpolicy2 import DTPolicy
+# from simpledt.replay_buffer import ReplayBuffer
+# from simpledt.simple_dt_optimizer import SimpleDTOptimizer
+
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+    # parser.add_argument("--env", type=str, default="Pendulum-v1")
+    parser.add_argument("--hidden-size", type=int, default=32)
+    parser.add_argument("--num-layers", type=int, default=2)
+    parser.add_argument("--nhead", type=int, default=2)
+    parser.add_argument("--dim-feedforward", type=int, default=32)
+    parser.add_argument("--max-steps", type=int, default=200)
+    parser.add_argument("--num-train-rollouts-per-epoch", type=int, default=200)
+    parser.add_argument("--num-eval-rollouts-per-epoch", type=int, default=20)
+    parser.add_argument("--num-epochs", type=int, default=1000)
+    parser.add_argument("--num-train-ops-per-epoch", type=int, default=200)
+    parser.add_argument("--eval-every", type=int, default=1)
+    parser.add_argument("--tb-log-every", type=int, default=1)
+    parser.add_argument("--learning-rate", type=float, default=3e-4)
+    parser.add_argument("--batch-size", type=int, default=20)
+    parser.add_argument("--num-best", type=int, default=20)
+    parser.add_argument("--policy-type", type=str, default="transformer")
+    parser.add_argument("--tb", type=str, default=None)
+    parser.add_argument("--device", type=str, default="cpu")
+    return parser.parse_args()
+
+
+def collect_rollouts(
+    num_rollouts,
+    env,
+    obs_size: int,
+    action_size: int,
+    policy,
+    max_steps,
+    num_history_steps,
+    action_info_to_action,
+    action_to_env_action,
+    action_visualiser=None,
+    print_each=10,
+    print_prefix='',
+) -> List[Rollout]:
+    rollouts = []
+    t1 = time.time()
+    for i in range(num_rollouts):
+
+        rollout = collect_rollout(
+            env=env,
+            obs_size=obs_size,
+            action_size=action_size,
+            policy=policy,
+            max_steps=max_steps,
+            num_history_steps=num_history_steps,
+            action_info_to_action=action_info_to_action,
+            action_to_env_action=action_to_env_action,
+            action_visualiser=action_visualiser,
+        )
+        if i % print_each == 0:
+            t2 = time.time()
+            print(f'--- {print_prefix} rollout {i} {t2 - t1} reward {rollout.rewards.sum()}')
+            t1 = t2
+            rollouts.append(rollout)
+    return rollouts
+
+
+def save_video_from_images(images: np.ndarray, video_path: str, fps: int):
+    """
+    Save a series of images as a video using OpenCV.
+
+    Args:
+        images: A numpy array of shape (num_frames, height, width, channels)
+        video_path: The path to save the video to.
+        fps: The frame rate of the video.
+    """
+    height, width, channels = images[0].shape
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    video_writer = cv2.VideoWriter(video_path, fourcc, fps, (width, height))
+    for image in images:
+        video_writer.write(cv2.cvtColor(image, cv2.COLOR_RGB2BGR))
+    video_writer.release()
+
+
+def draw_prob_histogram_on_image(
+    probs: np.ndarray,
+    size: Tuple[int, int],
+    color=(0, 0, 255)
+):
+    image = np.zeros(tuple(size) + (3,), dtype=np.uint8)
+    # Compute the histogram of the probabilities
+    # hist, bins = np.histogram(probs, bins=num_bins, range=(0.0, 1.0))
+    # Normalize the histogram to [0, image.shape[0]]
+    # hist = (hist / np.max(hist)) * image.shape[0]
+    hist = probs * image.shape[0]
+    num_bins = len(probs)
+    # Draw the histogram on the image
+    bin_width = image.shape[1] // num_bins
+    for i in range(num_bins):
+        x1 = i * bin_width
+        x2 = (i + 1) * bin_width
+        y = int(image.shape[0] - hist[i])
+        cv2.rectangle(image, (x1, y), (x2, image.shape[0]), color, -1)
+    return cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
+
+def save_rollout_video(rollout: Rollout, path: str):
+    data = rollout.observations.reshape(-1, 64, 60, 3) * 255
+    data = data.numpy().clip(0, 255).astype(np.uint8)
+    if 'action_vis' in rollout.info:
+        action_vis = rollout.info['action_vis'].numpy().astype(np.uint8)
+        data = np.concatenate([data[:-1], action_vis], axis=1)
+    save_video_from_images(
+        images=data,
+        video_path=path,
+        fps=24,
+    )
+
+
+def calc_reward_stats(rollouts: List[Rollout]):
+    rewards = [roll.total_reward for roll in rollouts]
+    return np.mean(rewards)
+
+
+def create_mario_env() -> gym.Env:
+    from nes_py.wrappers import JoypadSpace
+    import gym_super_mario_bros
+    from gym_super_mario_bros.actions import COMPLEX_MOVEMENT
+
+    env = gym_super_mario_bros.make("SuperMarioBros-1-1-v0")
+    env = ResizeObservationWrapper(env, (60, 64))
+    env = FlattenImageObservationWrapper(env)
+    env = ScaleObservationWrapper(env, 1.0/255)
+    env = JoypadSpace(env, COMPLEX_MOVEMENT)
+    return env
+
+
+def main():
+
+    # Parse the command-line arguments
+    args = parse_args()
+
+    # Create the environment and the policy
+    # env = gym.make(args.env)
+    env = create_mario_env()
+    obs_shape = env.observation_space.shape
+    act_shape = (12,)
+    obs_size = obs_shape[0]
+    action_size = act_shape[0]
+    num_history_steps = 4
+    policy = TransformerDecoderPolicy(
+        obs_size,
+        action_size,
+        hidden_size=args.hidden_size,
+        num_layers=args.num_layers,
+        nhead=args.nhead,
+        dim_feedforward=args.dim_feedforward,
+        output_seq_len=8,
+        batch_first=True,
+        device=args.device,
+    )
+
+    # Create the replay buffer
+
+    obs_dict_shape = {'obs': obs_shape}
+    best_replay_buffer = ReplayBuffer(
+        max_size=args.num_best,
+        rollout_len=args.max_steps,
+        observation_shape=obs_dict_shape,
+        action_shape=act_shape,
+        info_shape={},
+    )
+    eval_replay_buffer = ReplayBuffer(
+        max_size=args.num_eval_rollouts_per_epoch,
+        rollout_len=args.max_steps,
+        observation_shape=obs_dict_shape,
+        action_shape=act_shape,
+        info_shape={},
+    )
+
+    cem_optimizer = TransformerCEMOptimizer(
+        policy=policy,
+        optimizer=optim.Adam(
+            params=policy.parameters(),
+            lr=args.learning_rate
+        ),
+        device=args.device,
+    )
+
+    def action_info_to_action_sample(action_info: torch.Tensor) -> torch.Tensor:
+        last_action = action_info[0, -1]
+        probs = torch.softmax(last_action, -1)
+        action = torch.multinomial(probs, num_samples=1)
+        action_dist = torch.zeros_like(last_action)
+        action_dist[action] = 1
+        return action_dist
+
+    def action_info_to_action_argmax(action_info: torch.Tensor) -> torch.Tensor:
+        last_action = action_info[0, -1]
+        action = torch.argmax(last_action)
+        action_dist = torch.zeros_like(last_action)
+        action_dist[action] = 1
+        return action_dist
+
+    def action_to_env_action(action: torch.Tensor) -> np.ndarray:
+        action = torch.argmax(action).item()
+        return action
+
+    def action_vis(action_info: torch.Tensor) -> torch.Tensor:
+        last_action = action_info[0, -1]
+        return draw_prob_histogram_on_image(
+            probs=torch.softmax(last_action, -1).cpu().numpy(),
+            size=(64, 60)
+        )
+
+    torch.set_printoptions(sci_mode=False)
+    tb = SummaryWriter(args.tb) if args.tb else None
+    train_step = 0
+
+    # Collect rollouts and put them into the replay buffer
+    for epoch in range(args.num_epochs):
+        if epoch % args.eval_every == 0:
+            eval_rollouts = collect_rollouts(
+                num_rollouts=args.num_eval_rollouts_per_epoch,
+                env=env,
+                obs_size=obs_size,
+                action_size=action_size,
+                policy=policy,
+                max_steps=args.max_steps,
+                num_history_steps=num_history_steps,
+                action_info_to_action=action_info_to_action_argmax,
+                action_to_env_action=action_to_env_action,
+                action_visualiser=action_vis,
+                print_each=1,
+                print_prefix=f'eval-{epoch}',
+            )
+            for ind, rollout in enumerate(eval_rollouts):
+                reward = rollout.rewards.sum().item()
+                save_rollout_video(
+                    rollout,
+                    f'video/eval-ep-{epoch}-roll-{ind}-reward-{int(reward)}.mp4'
+                )
+                rollout.observations = {'obs': rollout.observations}
+                rollout.info = {}
+                eval_replay_buffer.add_rollout(rollout)
+            log_dict_to_tensorboard(
+                {
+                    'mean_reward': {
+                        'eval_mean': calc_reward_stats(eval_rollouts)
+                    }
+                },
+                epoch,
+                tb
+            )
+
+        rollouts = collect_rollouts(
+            num_rollouts=args.num_train_rollouts_per_epoch,
+            env=env,
+            obs_size=obs_size,
+            action_size=action_size,
+            policy=policy,
+            max_steps=args.max_steps,
+            num_history_steps=num_history_steps,
+            action_info_to_action=action_info_to_action_sample,
+            action_to_env_action=action_to_env_action,
+            action_visualiser=action_vis,
+            print_each=1,
+            print_prefix=f'train-{epoch}',
+        )
+
+        best_rollouts = get_best_n_rollouts_list(args.num_best, rollouts)
+        for ind, rollout in enumerate(best_rollouts):
+            reward = rollout.rewards.sum().item()
+            save_rollout_video(rollout, f'video/train-ep-{epoch}-rollout-{ind}-reward-{int(reward)}.mp4')
+            rollout.observations = {'obs': rollout.observations}
+            rollout.info = {}
+            best_replay_buffer.add_rollout(rollout)
+
+        mean_best = calc_reward_stats(best_rollouts)
+        mean_all = calc_reward_stats(rollouts)
+        best_rewards = [roll.total_reward for roll in best_rollouts]
+        log_dict_to_tensorboard({
+            'mean_reward': {
+                'train_best_mean': mean_best,
+                'train_all_mean': mean_all,
+            }
+        }, epoch, tb)
+        print(
+            f'--- rewards {mean_best} / {mean_all} '
+            f'{best_rewards}'
+        )
+
+        # need to do something with edge case in reward to go at the end of seqs
+        for i in range(args.num_train_ops_per_epoch):
+            batch = best_replay_buffer.sample_batch_of_seqs(args.batch_size, num_history_steps)
+            batch.observations = batch.observations['obs'][:, :-1]
+            # print(f'--- {batch.observations.shape} {batch.actions.shape}')
+            train_info = cem_optimizer.train_on_batch(batch)
+            if train_step % args.tb_log_every == 0:
+                if tb:
+                    log_dict_to_tensorboard(train_info, train_step, tb)
+
+                valid_info = ''
+                if epoch % args.eval_every == 0:
+                    eval_batch = eval_replay_buffer.sample_batch_of_seqs(args.batch_size, num_history_steps)
+                    eval_batch.observations = eval_batch.observations['obs'][:, :-1]
+                    valid_info = cem_optimizer.validate_on_batch(eval_batch)
+                    if tb:
+                        log_dict_to_tensorboard(valid_info, train_step, tb)
+
+                print(f'--- epoch {epoch} {train_step} info {train_info} {valid_info}')
+
+            train_step += 1
+
+
+if __name__ == "__main__":
+    main()
+
+
+# python src/bin/train_mario --num-epochs 100000 --num-train-rollouts-per-epoch 40 --num-eval-rollouts-per-epoch 1 --device cuda:0  --num-train-ops-per-epoch 200  --max-steps 1000 --learning-rate 3e-4 --batch-size 128 --num-best 20 --tb ./tb/cem2 --hidden-size 256 --num-layers 2 --nhead 2 --dim-feedforward 512
