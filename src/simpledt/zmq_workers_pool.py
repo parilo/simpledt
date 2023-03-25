@@ -4,29 +4,30 @@ import multiprocessing as mp
 
 
 class WorkerProcess:
-    def __init__(self, worker_class, port):
+    def __init__(self, worker_class, worker_args, port):
         self.worker_class = worker_class
+        self.worker_args = worker_args
         self.port = port
 
     def start(self):
         context = zmq.Context()
         socket = context.socket(zmq.REP)
         socket.bind(f"tcp://*:{self.port}")
-        worker = pickle.loads(self.worker_class)()
+        worker = pickle.loads(self.worker_class)(**self.worker_args)
         while True:
-            message = socket.recv_pyobj()
-            print('recv', self.port, message)
-            if message == "stop":
+            step_args = socket.recv_pyobj()
+            if step_args == "stop":
                 break
-            result = worker.step(*message)
+            result = worker.step(*step_args)
             socket.send_pyobj(result)
         socket.close()
         context.term()
 
 
 class WorkerPool:
-    def __init__(self, worker_class, num_workers):
+    def __init__(self, worker_class, worker_args, num_workers):
         self.worker_class = pickle.dumps(worker_class)
+        self.worker_args = worker_args
         self.num_workers = num_workers
         self.workers = []
         self.running = False
@@ -38,8 +39,9 @@ class WorkerPool:
         self.running = True
         for i in range(self.num_workers):
             port = self.start_port + i
-            worker = WorkerProcess(self.worker_class, port)
-            worker_process = mp.Process(target=worker.start)
+            worker = WorkerProcess(self.worker_class, self.worker_args, port)
+            mpctx = mp.get_context('spawn')
+            worker_process = mpctx.Process(target=worker.start)
             worker_process.start()
             self.workers.append(worker_process)
             self.worker_ports.append(port)
@@ -71,6 +73,10 @@ class WorkerPool:
             result = socket.recv_pyobj()
             results.append(result)
         return results
+
+    def request(self, num_reqs: int, *args):
+        self.submit(num_reqs, *args)
+        return self.get_results(num_reqs)
 
 
 class MyWorker:

@@ -1,3 +1,4 @@
+from ast import Dict
 from typing import Callable
 import gymnasium as gym
 import torch
@@ -16,7 +17,7 @@ def collect_rollout(
     num_history_steps: int = 1,
     action_info_to_action: Callable[[torch.Tensor], torch.Tensor] = None,
     action_to_env_action: Callable[[torch.Tensor], np.ndarray] = None,
-    action_visualiser: Callable[[torch.Tensor], np.ndarray] = None,
+    info_modifier: Callable[[torch.Tensor, torch.Tensor, float, bool, bool, Dict], None] = None,
 ) -> Rollout:
     observations = torch.zeros(1, max_steps + 1, obs_size, dtype=torch.float)
     actions = torch.zeros(1, max_steps, action_size, dtype=torch.float)
@@ -52,8 +53,9 @@ def collect_rollout(
         terminated.append(torch.tensor(terminated_step, dtype=torch.bool))
         truncated.append(torch.tensor(truncated_step, dtype=torch.bool))
 
-        if action_visualiser:
-            info_step['action_vis'] = action_visualiser(action_info)
+        if info_modifier:
+            # info_step['action_vis'] = action_visualiser(action_info)
+            info_modifier(observation, action_info, reward, terminated_step, truncated_step, info_step)
 
         # Convert info_step (a dictionary) into a tensor and add it to the info dictionary
         for key, value in info_step.items():

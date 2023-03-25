@@ -29,7 +29,7 @@ class TransformerCEMOptimizer:
         self.optimizer = optimizer
         self.device = device
 
-    def _calc_loss(self, batch: BatchOfSeq) -> torch.Tensor:
+    def _calc_loss(self, batch: BatchOfSeq, entropy_reg_weight: float = 0) -> torch.Tensor:
         observations = batch.observations
         actions = batch.actions
 
@@ -49,18 +49,31 @@ class TransformerCEMOptimizer:
         targets = actions.argmax(-1)
         # print(targets)
         # print(next_actions)
-        next_actions_reshaped = next_actions.reshape(-1, next_actions.shape[-1])
+        num_action_bins = next_actions.shape[-1]
+        next_actions_reshaped = next_actions.reshape(-1, num_action_bins)
         targets = targets.reshape(-1)
         # print(f'--- next_actions {next_actions.shape} next_actions_reshaped {next_actions_reshaped.shape} targets {targets.shape}')
 
-        random_targets = torch.randint_like(targets, 12)
-        ce_loss = F.cross_entropy(next_actions_reshaped, targets) + 0.1 * F.cross_entropy(next_actions_reshaped, random_targets)
-        return ce_loss
+        ce_loss = F.cross_entropy(next_actions_reshaped, targets)
+        if entropy_reg_weight > 0:
+            # random_targets = torch.randint_like(targets, num_action_bins)
+            # ce_loss += entropy_reg_weight * F.cross_entropy(next_actions_reshaped, random_targets)
+
+            # reg_loss = entropy_reg_weight * next_actions_reshaped
+            # reg_loss[next_actions_reshaped < 1e-3] = 0
+            # ce_loss += reg_loss.mean()
+
+            ce_loss += entropy_reg_weight * F.mse_loss(
+                next_actions_reshaped,
+                torch.zeros_like(next_actions_reshaped)
+            )
+
+        return ce_loss, next_actions
 
     def train_on_batch(self, batch: BatchOfSeq) -> Dict[str, float]:
 
         # Compute the loss
-        loss = self._calc_loss(batch)
+        loss, action_bins = self._calc_loss(batch, entropy_reg_weight=0.05)
 
         # Perform backpropagation and optimization
         self.optimizer.zero_grad()
@@ -70,17 +83,29 @@ class TransformerCEMOptimizer:
         return {
             "ce_loss": {
                 "train": loss.item(),
-            }
+            },
+            "action_logits_min": {
+                "train": action_bins.min().item(),
+            },
+            "action_logits_max": {
+                "train": action_bins.max().item(),
+            },
         }
 
     def validate_on_batch(self, batch: BatchOfSeq) -> Dict[str, float]:
 
         # Compute the loss
         with torch.no_grad():
-            loss = self._calc_loss(batch)
+            loss, action_bins = self._calc_loss(batch)
 
         return {
             "ce_loss": {
                 "valid": loss.item(),
-            }
+            },
+            "action_logits_min": {
+                "valid": action_bins.min().item(),
+            },
+            "action_logits_max": {
+                "valid": action_bins.max().item(),
+            },
         }

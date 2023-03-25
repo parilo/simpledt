@@ -5,8 +5,8 @@ import torch.nn as nn
 
 def generate_square_subsequent_mask(size: int, diagonal: int) -> torch.Tensor:
     """Generates an upper-triangular matrix of -inf, with zeros on diag."""
-    # return torch.triu(torch.ones(size, size) * float("-inf"), diagonal=diagonal)
-    return torch.triu(torch.ones(size, size), diagonal=1).bool()
+    return torch.triu(torch.ones(size, size) * float("-inf"), diagonal=diagonal)
+    # return torch.triu(torch.ones(size, size), diagonal=1).bool()
 
 # def generate_custom_mask(size: int) -> torch.Tensor:
 #     # Create an empty mask
@@ -119,17 +119,29 @@ class TransformerDecoderPolicy(nn.Module):
         #     self.device
         # )
         # self.input_fc = nn.Linear(self.obs_size, self.hidden_size).to(self.device)
+        # self.output_fc = nn.Linear(self.hidden_size, self.action_size).to(self.device)
+        # self.action_fc = nn.Linear(self.action_size, self.hidden_size).to(self.device)
         self.pos_encoder = PositionalEncoding(self.hidden_size).to(self.device)
         self.input_fc = create_mlp(self.obs_size, self.hidden_size, self.hidden_size).to(self.device)
-        self.output_fc = nn.Linear(self.hidden_size, self.action_size).to(self.device)
-        self.action_fc = nn.Linear(self.action_size, self.hidden_size).to(self.device)
+        self.output_fc = create_mlp(self.hidden_size, self.hidden_size, self.action_size).to(self.device)
+        self.action_fc = create_mlp(self.action_size, self.hidden_size, self.hidden_size).to(self.device)
         # init so action are near zeros
-        nn.init.normal_(self.action_fc.weight, mean=0.0, std=0.001)
-        nn.init.constant_(self.action_fc.bias, 0.0)
+        # nn.init.normal_(self.action_fc.weight, mean=0.0, std=0.001)
+        # nn.init.constant_(self.action_fc.bias, 0.0)
         self._tgt_mask = generate_square_subsequent_mask(output_seq_len + 1, 1).to(
             device
         )
         print('mask', self._tgt_mask)
+
+    def to(self, device):
+        self.device = device
+        self.transformer = self.transformer.to(device)
+        self.pos_encoder = self.pos_encoder.to(device)
+        self.input_fc = self.input_fc.to(device)
+        self.output_fc = self.output_fc.to(device)
+        self.action_fc = self.action_fc.to(device)
+        self._tgt_mask = self._tgt_mask.to(device)
+        return self
 
     def forward(
         self,
