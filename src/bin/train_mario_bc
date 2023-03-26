@@ -1,0 +1,166 @@
+import argparse
+import os
+import pickle
+from pprint import pprint
+import cv2
+
+from typing import Any, List, Tuple
+
+import torch
+import torch.optim as optim
+from torch.utils.tensorboard import SummaryWriter
+from simpledt.cem_optimizer_transformer import TransformerCEMOptimizer
+from simpledt.dataset.pickled_rollout_dataset import PickledRolloutDataset
+from simpledt.keyboard_policy import MARIO_CONTROL
+from simpledt.models.transformer_decoder import TransformerDecoderPolicy
+from simpledt.rollout import BatchOfSeq, Rollout
+from simpledt.tb import log_dict_to_tensorboard
+
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--hidden-size", type=int, default=32)
+    parser.add_argument("--num-layers", type=int, default=2)
+    parser.add_argument("--nhead", type=int, default=2)
+    parser.add_argument("--dim-feedforward", type=int, default=32)
+    parser.add_argument("--num-epochs", type=int, default=1000)
+    parser.add_argument("--num-train-ops-per-epoch", type=int, default=200)
+    parser.add_argument("--valid-every", type=int, default=1)
+    parser.add_argument("--tb-log-every", type=int, default=1)
+    parser.add_argument("--save-dir", type=str, default=None)
+    parser.add_argument("--save-every", type=int, default=2000)
+    parser.add_argument("--learning-rate", type=float, default=3e-4)
+    parser.add_argument("--batch-size", type=int, default=20)
+    parser.add_argument("--tb", type=str, default=None)
+    parser.add_argument("--device", type=str, default="cpu")
+    parser.add_argument("--num-workers", type=int, default=4)
+    return parser.parse_args()
+
+
+def load_jpeg(jpeg_data, jpeg_lens, resize=None) -> torch.Tensor:
+    imgs = []
+    for ind in range(len(jpeg_lens)):
+        jpeg_len = int(jpeg_lens[ind])
+        img = cv2.imdecode(jpeg_data[ind, :jpeg_len].numpy(), cv2.IMREAD_COLOR)
+        if resize:
+            img = cv2.resize(img, resize[::-1])
+        imgs.append(torch.tensor(img).float())
+    imgs_tensor = torch.stack(imgs, dim=0)
+    return imgs_tensor
+
+
+def preproc(rollout: Rollout, start_index: int, end_index: int) -> Tuple[torch.Tensor, torch.Tensor]:
+    jpeg_lens = rollout.info['obs_jpeg_len']
+    jpeg_data = rollout.info['obs_jpeg']
+    obs = load_jpeg(
+        jpeg_data[start_index:end_index],
+        jpeg_lens[start_index:end_index],
+        resize=(60, 64),
+    )
+    act = rollout.actions[start_index:end_index]
+    return obs.reshape(obs.shape[0], -1), act
+
+
+def main():
+
+    # Parse the command-line arguments
+    args = parse_args()
+
+    # Create the replay buffer
+
+    train_dataset = PickledRolloutDataset(
+        dirs=[
+            'train-1-5',
+        ],
+        seq_len=4,
+        preprocess=preproc,
+    )
+    pprint(train_dataset.get_stats())
+
+    valid_dataset = PickledRolloutDataset(
+        dirs=[
+            'valid-1-1',
+            'valid-1-2',
+        ],
+        seq_len=4,
+        preprocess=preproc,
+    )
+    pprint(valid_dataset.get_stats())
+
+    train_dataloader = torch.utils.data.DataLoader(
+        train_dataset,
+        batch_size=args.batch_size,
+        num_workers=args.num_workers,
+    )
+
+    valid_dataloader = torch.utils.data.DataLoader(
+        valid_dataset,
+        batch_size=args.batch_size,
+        num_workers=args.num_workers,
+    )
+
+    obs_size = 60 * 64 * 3
+    action_size = len(MARIO_CONTROL)
+
+    policy = TransformerDecoderPolicy(
+        obs_size,
+        action_size,
+        hidden_size=args.hidden_size,
+        num_layers=args.num_layers,
+        nhead=args.nhead,
+        dim_feedforward=args.dim_feedforward,
+        output_seq_len=8,
+        batch_first=True,
+        device=args.device,
+    )
+
+    cem_optimizer = TransformerCEMOptimizer(
+        policy=policy,
+        optimizer=optim.Adam(
+            params=policy.parameters(),
+            lr=args.learning_rate
+        ),
+        device=args.device,
+    )
+
+    torch.set_printoptions(sci_mode=False)
+    tb = SummaryWriter(args.tb) if args.tb else None
+    train_step = 0
+
+    train_iter = iter(train_dataloader)
+    valid_iter = iter(valid_dataloader)
+
+    if args.save_dir:
+        os.makedirs(args.save_dir, exist_ok=True)
+
+    # Collect rollouts and put them into the replay buffer
+    for epoch in range(args.num_epochs):
+        for i in range(args.num_train_ops_per_epoch):
+
+            batch_obs, batch_act = next(train_iter)
+            batch = BatchOfSeq(observations=batch_obs, actions=batch_act)
+            train_info = cem_optimizer.train_on_batch(batch)
+
+            if train_step % args.tb_log_every == 0 and tb:
+                log_dict_to_tensorboard(train_info, train_step, tb)
+
+            if train_step % args.valid_every == 0 and tb:
+                valid_batch_obs, valid_batch_act = next(valid_iter)
+                valid_batch = BatchOfSeq(observations=valid_batch_obs, actions=valid_batch_act)
+                valid_info = cem_optimizer.validate_on_batch(valid_batch)
+                log_dict_to_tensorboard(valid_info, train_step, tb)
+                print(train_step, train_info, valid_info)
+
+            if args.save_dir and train_step % args.save_every == 0:
+                policy_path = os.path.join(args.save_dir, f'policy-{train_step}.pkl')
+                with open(policy_path, 'wb') as f:
+                    pickle.dump(policy, f)
+
+            train_step += 1
+
+
+if __name__ == "__main__":
+    main()
+
+
+#

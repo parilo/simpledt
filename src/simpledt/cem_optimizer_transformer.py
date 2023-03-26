@@ -24,10 +24,12 @@ class TransformerCEMOptimizer:
         policy: TransformerDecoderPolicy,
         optimizer: optim.Optimizer,
         device: torch.device,
+        entropy_reg_weight: float = 0,
     ):
         self.policy = policy
         self.optimizer = optimizer
         self.device = device
+        self.entropy_reg_weight = entropy_reg_weight
 
     def _calc_loss(self, batch: BatchOfSeq, entropy_reg_weight: float = 0) -> torch.Tensor:
         observations = batch.observations
@@ -73,7 +75,10 @@ class TransformerCEMOptimizer:
     def train_on_batch(self, batch: BatchOfSeq) -> Dict[str, float]:
 
         # Compute the loss
-        loss, action_bins = self._calc_loss(batch, entropy_reg_weight=0.05)
+        loss, action_bins = self._calc_loss(
+            batch,
+            entropy_reg_weight=self.entropy_reg_weight,
+        )
 
         # Perform backpropagation and optimization
         self.optimizer.zero_grad()

@@ -93,53 +93,6 @@ class ReplayBuffer:
         batch_term = torch.stack(batch_term)
         return BatchOfSeq(batch_obs, batch_act, batch_rew, batch_term)
 
-    # def sample_batch_of_seqs(self, batch_size: int, seq_len: int):
-    #     indices = torch.randperm(self.size - seq_len + 1)[:batch_size]
-    #     end_indices = indices + seq_len
-    #     observations = {
-    #         key: torch.stack(
-    #             [
-    #                 self.observations[key][start_idx:end_idx]
-    #                 for start_idx, end_idx in zip(indices, end_indices)
-    #             ]
-    #         )
-    #         for key in self.observation_keys
-    #     }
-    #     actions = torch.stack(
-    #         [
-    #             self.actions[start_idx:end_idx]
-    #             for start_idx, end_idx in zip(indices, end_indices)
-    #         ]
-    #     )
-    #     rewards = torch.stack(
-    #         [
-    #             self.rewards[start_idx:end_idx]
-    #             for start_idx, end_idx in zip(indices, end_indices)
-    #         ]
-    #     )
-    #     terminated = torch.stack(
-    #         [
-    #             self.terminated[start_idx:end_idx]
-    #             for start_idx, end_idx in zip(indices, end_indices)
-    #         ]
-    #     )
-    #     truncated = torch.stack(
-    #         [
-    #             self.truncated[start_idx:end_idx]
-    #             for start_idx, end_idx in zip(indices, end_indices)
-    #         ]
-    #     )
-    #     info = {
-    #         key: torch.stack(
-    #             [
-    #                 self.info[key][start_idx:end_idx]
-    #                 for start_idx, end_idx in zip(indices, end_indices)
-    #             ]
-    #         )
-    #         for key in self.info_keys
-    #     }
-    #     return BatchOfSeq(observations, actions, rewards, terminated, truncated, info)
-
     def get_content(self) -> BatchOfSeq:
         return BatchOfSeq(
             observations=self.observations,

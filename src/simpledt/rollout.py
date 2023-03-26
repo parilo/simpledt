@@ -5,21 +5,21 @@ from dataclasses import dataclass
 
 @dataclass
 class Rollout:
-    observations: Dict[str, torch.Tensor]  # fixed
+    observations: torch.Tensor
     actions: torch.Tensor
     rewards: torch.Tensor
     terminated: torch.Tensor
     truncated: torch.Tensor
-    info: Dict[str, torch.Tensor]  # fixed
+    info: Dict[str, torch.Tensor]
     size: int
     total_reward: float
 
 
 @dataclass
 class BatchOfSeq:
-    observations: Dict[str, torch.Tensor]
-    actions: torch.Tensor
-    rewards: torch.Tensor
+    observations: torch.Tensor = None
+    actions: torch.Tensor = None
+    rewards: torch.Tensor = None
     terminated: torch.Tensor = None
     truncated: torch.Tensor = None
     info: Dict[str, torch.Tensor] = None  # fixed
