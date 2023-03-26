@@ -1,11 +1,28 @@
 from ast import Dict
-from typing import Callable
+from typing import Callable, List
 import gymnasium as gym
 import torch
 import numpy as np
 
 from simpledt.models.dtpolicy import DTPolicy
 from simpledt.rollout import Rollout
+
+
+def merge_arrays(arrays: List[torch.Tensor]) -> torch.Tensor:
+    # Determine the maximum length of the arrays
+    max_len = max([len(arr) for arr in arrays])
+
+    # Create a new array with the same data type as the input arrays,
+    # and shape (num_arrays, max_len)
+    result = torch.zeros((len(arrays), max_len), dtype=arrays[0].dtype)
+
+    # Iterate through the input arrays
+    for i, arr in enumerate(arrays):
+        # Copy the values from the input array to the corresponding row
+        # of the result array
+        result[i, :len(arr)] = arr
+
+    return result
 
 
 def collect_rollout(
@@ -48,23 +65,24 @@ def collect_rollout(
         observation, reward, terminated_step, truncated_step, info_step = env.step(
             action_step
         )
+
+        if info_modifier:
+            observation, action_info, reward, terminated_step, truncated_step, info_step = info_modifier(observation, action_info, reward, terminated_step, truncated_step, info_step)
+
         observations[0, step + 1, :] = torch.tensor(observation, dtype=torch.float)
         rewards[0, step, 0] = reward
         terminated.append(torch.tensor(terminated_step, dtype=torch.bool))
         truncated.append(torch.tensor(truncated_step, dtype=torch.bool))
 
-        if info_modifier:
-            # info_step['action_vis'] = action_visualiser(action_info)
-            info_modifier(observation, action_info, reward, terminated_step, truncated_step, info_step)
-
         # Convert info_step (a dictionary) into a tensor and add it to the info dictionary
         for key, value in info_step.items():
             if isinstance(value, str):
                 continue
+            tval = torch.tensor(value, dtype=torch.float) if not isinstance(value, torch.Tensor) else value
             if key not in info:
-                info[key] = [torch.tensor(value, dtype=torch.float)]
+                info[key] = [tval]
             else:
-                info[key].append(torch.tensor(value, dtype=torch.float))
+                info[key].append(tval)
 
         # If the environment has terminated, stop collecting the rollout
         if terminated_step or truncated_step:
@@ -72,7 +90,10 @@ def collect_rollout(
 
     # Concatenate the tensors in the info dictionary along the time dimension
     for key in info:
-        info[key] = torch.stack(info[key], dim=0)
+        try:
+            info[key] = torch.stack(info[key], dim=0)
+        except RuntimeError as err:
+            info[key] = merge_arrays(info[key])
 
     # Concatenate the lists of terminated and truncated into tensors
     terminated = torch.tensor(terminated).unsqueeze(-1)

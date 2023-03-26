@@ -1,0 +1,139 @@
+import argparse
+import os
+import pickle
+import random
+import time
+import gymnasium as gym
+import cv2
+import numpy as np
+
+from typing import Any, List, Optional, Tuple
+
+import torch
+from torch.utils.tensorboard import SummaryWriter
+from simpledt.cem_optimizer import get_best_n_rollouts_list
+from simpledt.cem_optimizer_transformer import TransformerCEMOptimizer
+from simpledt.collect2 import collect_rollout
+from simpledt.keyboard_policy import MARIO_CONTROL, MarioKeyboardPolicy
+from simpledt.models.transformer_decoder import TransformerDecoderPolicy
+from simpledt.replay_buffer import ReplayBuffer
+from simpledt.save_video import save_video_from_images
+from simpledt.wrappers.flatten_obs_wrapper import FlattenImageObservationWrapper
+from simpledt.wrappers.resize_obs_wrapper import ResizeObservationWrapper
+from simpledt.wrappers.scale_obs_wrapper import ScaleObservationWrapper
+
+from simpledt.rollout import Rollout, trim_rollout
+from simpledt.tb import log_dict_to_tensorboard
+from simpledt.zmq_workers_pool import WorkerPool
+
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--max-steps", type=int, default=200)
+    parser.add_argument("--num-episodes", type=int, default=1)
+    parser.add_argument("--eps-path", type=str, default="episodes")
+    parser.add_argument("--video-path", type=str, default="video")
+    return parser.parse_args()
+
+
+def create_mario_env() -> gym.Env:
+    from nes_py.wrappers import JoypadSpace
+    import gym_super_mario_bros
+
+    env = gym_super_mario_bros.make("SuperMarioBros-1-1-v0")
+    env = FlattenImageObservationWrapper(env)
+    env = JoypadSpace(env, MARIO_CONTROL)
+    return env
+
+
+def action_to_env_action(action: torch.Tensor) -> np.ndarray:
+    action = torch.argmax(action).item()
+    return action
+
+
+def info_modifier(
+    observation,
+    action_info,
+    reward,
+    terminated_step,
+    truncated_step,
+    info_step
+):
+
+    # print(f'--- observation {observation.shape}')
+    # img = observation.reshape(240, 256, 3)
+    # img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    # cv2.imshow('mario', img)
+    # cv2.waitKey(3)
+
+    # last_action = action_info[0, -1]
+    # info_step['action_vis'] = draw_prob_histogram_on_image(
+    #     probs=torch.softmax(last_action, -1).cpu().numpy(),
+    #     size=(64, 60)
+    # )
+    # info_step['action_bin_min'] = last_action.min().item()
+    # info_step['action_bin_max'] = last_action.max().item()
+
+    img = observation.reshape(240, 256, 3)
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+
+    _, jpeg_bytes = cv2.imencode('.jpg', img, [cv2.IMWRITE_JPEG_QUALITY, 95])
+    jpeg_data = np.frombuffer(jpeg_bytes.tobytes(), dtype=np.uint8)
+    info_step['obs_jpeg_len'] = len(jpeg_data)
+    info_step['obs_jpeg'] = torch.as_tensor(jpeg_data, dtype=torch.uint8)
+
+    return observation, action_info, reward, terminated_step, truncated_step, info_step
+
+
+def main():
+
+    # Parse the command-line arguments
+    args = parse_args()
+
+    # Create the environment and the policy
+    env = create_mario_env()
+    obs_shape = env.observation_space.shape
+    act_shape = (len(MARIO_CONTROL),)
+    obs_size = obs_shape[0]
+    action_size = act_shape[0]
+
+    policy = MarioKeyboardPolicy()
+
+    os.makedirs(args.eps_path, exist_ok=True)
+    os.makedirs(args.video_path, exist_ok=True)
+
+    zero_action = torch.zeros(len(MARIO_CONTROL))
+    zero_action[0] = 1
+
+    # Collect rollouts
+    for i in range(args.num_episodes):
+        rollout = collect_rollout(
+            env=env,
+            obs_size=obs_size,
+            action_size=action_size,
+            policy=policy,
+            max_steps=args.max_steps,
+            num_history_steps=1,
+            action_to_env_action=action_to_env_action,
+            info_modifier=info_modifier,
+        )
+        prev_size = rollout.size
+        rollout = trim_rollout(rollout, zero_action)
+        print(f'--- trimmed {rollout.size} / {prev_size}')
+        if input('save? ') == 'y':
+            video_path = os.path.join(args.video_path, f'episode-{i}.mp4')
+            imgs = rollout.observations.reshape(-1, 240, 256, 3).numpy().astype(np.uint8)
+            save_video_from_images(imgs, video_path, 30)
+
+            ep_path = os.path.join(args.eps_path, f'episode-{i}.pkl')
+            rollout.observations = None
+            # print('asdasd', rollout.info['obs_jpeg'].dtype)
+            # for key, val in rollout.info.items():
+            #     print(key, val.shape)
+            with open(ep_path, 'wb') as f:
+                pickle.dump(rollout, f)
+
+
+
+if __name__ == "__main__":
+    main()
