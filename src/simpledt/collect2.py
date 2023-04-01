@@ -32,7 +32,6 @@ def collect_rollout(
     policy: DTPolicy,
     max_steps: int,
     num_history_steps: int = 1,
-    frame_skip: int = 1,
     action_info_to_action: Callable[[torch.Tensor], torch.Tensor] = None,
     action_to_env_action: Callable[[torch.Tensor], np.ndarray] = None,
     info_modifier: Callable[[torch.Tensor, torch.Tensor, float, bool, bool, Dict], None] = None,
@@ -66,14 +65,9 @@ def collect_rollout(
 
         # Step the environment and store the results
         action_step = action_to_env_action(actions[0, step]) if action_to_env_action else actions[0, step].cpu().numpy()
-        reward = 0
-        for _ in range(frame_skip):
-            observation, substep_reward, terminated_step, truncated_step, info_step = env.step(
-                action_step
-            )
-            reward += substep_reward
-            if terminated_step or truncated_step:
-                break
+        observation, reward, terminated_step, truncated_step, info_step = env.step(
+            action_step
+        )
 
         if info_modifier:
             observation, action_info, reward, terminated_step, truncated_step, info_step = info_modifier(observation, action_info, reward, terminated_step, truncated_step, info_step)

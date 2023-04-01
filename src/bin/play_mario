@@ -19,11 +19,13 @@ from simpledt.models.transformer_decoder import TransformerDecoderPolicy
 from simpledt.replay_buffer import ReplayBuffer
 from simpledt.save_video import save_video_from_images
 from simpledt.wrappers.flatten_obs_wrapper import FlattenImageObservationWrapper
+from simpledt.wrappers.frame_skip_wrapper import FrameSkipWrapper
 from simpledt.wrappers.resize_obs_wrapper import ResizeObservationWrapper
 from simpledt.wrappers.scale_obs_wrapper import ScaleObservationWrapper
 
 from simpledt.rollout import Rollout, trim_rollout
 from simpledt.tb import log_dict_to_tensorboard
+from simpledt.wrappers.sleep_wrapper import SleepWrapper
 from simpledt.zmq_workers_pool import WorkerPool
 
 
@@ -37,12 +39,14 @@ def parse_args():
     return parser.parse_args()
 
 
-def create_mario_env() -> gym.Env:
+def create_mario_env(frame_skip: int) -> gym.Env:
     from nes_py.wrappers import JoypadSpace
     import gym_super_mario_bros
 
     env = gym_super_mario_bros.make("SuperMarioBros-1-1-v0")
     env = FlattenImageObservationWrapper(env)
+    env = FrameSkipWrapper(env, frame_skip)
+    env = SleepWrapper(env, dt=0.025)
     env = JoypadSpace(env, MARIO_CONTROL)
     return env
 
@@ -92,7 +96,7 @@ def main():
     args = parse_args()
 
     # Create the environment and the policy
-    env = create_mario_env()
+    env = create_mario_env(args.frame_skip)
     obs_shape = env.observation_space.shape
     act_shape = (len(MARIO_CONTROL),)
     obs_size = obs_shape[0]
@@ -115,7 +119,6 @@ def main():
             policy=policy,
             max_steps=args.max_steps,
             num_history_steps=1,
-            frame_skip=args.frame_skip,
             action_to_env_action=action_to_env_action,
             # info_modifier=info_modifier,
         )
