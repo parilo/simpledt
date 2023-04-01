@@ -1,6 +1,7 @@
 import os
 import random
 import pickle
+import sys
 from typing import Callable, Dict, List
 import torch
 from torch.utils.data import IterableDataset
@@ -22,6 +23,9 @@ class PickledRolloutDataset(IterableDataset):
                             rollout = pickle.load(f)
                             self.rollouts.append(rollout)
                             self.transitions += rollout.size
+                            sys.stdout.write('.')
+                            sys.stdout.flush()
+        print()
 
     def get_stats(self) -> Dict:
         return {

@@ -24,5 +24,5 @@ class ResizeObservationWrapper(gym.ObservationWrapper):
         """
         Resize observation image to desired size using OpenCV.
         """
-        resized_obs = cv2.resize(obs, self.size, interpolation=cv2.INTER_AREA)
+        resized_obs = cv2.resize(obs, self.size[::-1], interpolation=cv2.INTER_AREA)
         return resized_obs

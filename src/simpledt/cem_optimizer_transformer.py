@@ -55,6 +55,8 @@ class TransformerCEMOptimizer:
         next_actions_reshaped = next_actions.reshape(-1, num_action_bins)
         targets = targets.reshape(-1)
         # print(f'--- next_actions {next_actions.shape} next_actions_reshaped {next_actions_reshaped.shape} targets {targets.shape}')
+        # torch.set_printoptions(sci_mode=False)
+        # print(targets)
 
         ce_loss = F.cross_entropy(next_actions_reshaped, targets)
         if entropy_reg_weight > 0:

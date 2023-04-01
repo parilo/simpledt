@@ -1,0 +1,176 @@
+import argparse
+import os
+import pickle
+import random
+import time
+import gymnasium as gym
+import cv2
+import numpy as np
+
+from typing import Any, List, Optional, Tuple
+
+import torch
+from torch.utils.tensorboard import SummaryWriter
+from simpledt.cem_optimizer import get_best_n_rollouts_list
+from simpledt.cem_optimizer_transformer import TransformerCEMOptimizer
+from simpledt.collect2 import collect_rollout
+from simpledt.keyboard_policy import MARIO_CONTROL, MarioKeyboardPolicy
+from simpledt.models.transformer_decoder import TransformerDecoderPolicy
+from simpledt.replay_buffer import ReplayBuffer
+from simpledt.save_video import save_video_from_images
+from simpledt.vis import add_action_vis, draw_prob_histogram_on_image
+from simpledt.wrappers.flatten_obs_wrapper import FlattenImageObservationWrapper
+from simpledt.wrappers.resize_obs_wrapper import ResizeObservationWrapper
+from simpledt.wrappers.scale_obs_wrapper import ScaleObservationWrapper
+
+from simpledt.rollout import Rollout, trim_rollout
+from simpledt.tb import log_dict_to_tensorboard
+from simpledt.zmq_workers_pool import WorkerPool
+
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--policy-path", type=str, required=True)
+    parser.add_argument("--max-steps", type=int, default=200)
+    parser.add_argument("--num-episodes", type=int, default=1)
+    parser.add_argument("--eps-path", type=str, default=None)
+    parser.add_argument("--video-path", type=str, default=None)
+    parser.add_argument("--seq-len", type=int, default=4)
+    return parser.parse_args()
+
+
+class JpegWrapper(gym.ObservationWrapper):
+    """
+    Wrapper to resize observation image in a Gym environment to a desired size.
+    """
+
+    def __init__(self, env):
+        super().__init__(env)
+        # self.size = size
+
+        # Update observation space to reflect resized image dimensions
+        # self.observation_space = gym.spaces.Box(
+        #     low=0,
+        #     high=255,
+        #     shape=(self.size[0], self.size[1], self.observation_space.shape[2]),
+        #     dtype=np.uint8,
+        # )
+
+    def observation(self, obs):
+        """
+        Resize observation image to desired size using OpenCV.
+        """
+        obs = cv2.cvtColor(obs, cv2.COLOR_RGB2BGR)
+        _, jpeg_bytes = cv2.imencode('.jpg', obs, [cv2.IMWRITE_JPEG_QUALITY, 95])
+        jpeg_data = np.frombuffer(jpeg_bytes.tobytes(), dtype=np.uint8)
+        obs_jpeg_len = len(jpeg_data)
+        obs_jpeg = torch.as_tensor(jpeg_data, dtype=torch.uint8)
+
+        img = cv2.imdecode(obs_jpeg[:obs_jpeg_len].numpy(), cv2.IMREAD_COLOR)
+        obs = cv2.cvtColor(obs, cv2.COLOR_BGR2RGB)
+        # img_tensor = torch.tensor(img).float()
+        return img
+
+
+def create_mario_env() -> gym.Env:
+    from nes_py.wrappers import JoypadSpace
+    import gym_super_mario_bros
+
+    env = gym_super_mario_bros.make("SuperMarioBros-1-1-v0")
+    env = JpegWrapper(env)
+    env = ResizeObservationWrapper(env, (60, 64))
+    env = FlattenImageObservationWrapper(env)
+    env = ScaleObservationWrapper(env, 1.0/255)
+    env = JoypadSpace(env, MARIO_CONTROL)
+    return env
+
+
+def action_to_env_action(action: torch.Tensor) -> np.ndarray:
+    action = torch.argmax(action).item()
+    return action
+
+
+def action_info_to_action_sample(action_info: torch.Tensor) -> torch.Tensor:
+    last_action = action_info[0, -1]
+    probs = torch.softmax(last_action, -1)
+    torch.set_printoptions(sci_mode=False)
+    action = torch.multinomial(probs, num_samples=1)
+    print('action_info_to_action_sample', probs, 'sampled', action)
+    action_dist = torch.zeros_like(last_action)
+    action_dist[action] = 1
+    return action_dist
+
+
+# def action_info_to_action_argmax(action_info: torch.Tensor) -> torch.Tensor:
+#     last_action = action_info[0, -1]
+#     action = torch.argmax(last_action)
+#     action_dist = torch.zeros_like(last_action)
+#     action_dist[action] = 1
+#     return action_dist
+
+
+def info_modifier(
+    observation,
+    action_info,
+    reward,
+    terminated_step,
+    truncated_step,
+    info_step
+):
+    last_action = action_info[0, -1]
+    probs = torch.softmax(last_action, -1)
+    info_step['action_probs'] = probs
+    return observation, action_info, reward, terminated_step, truncated_step, info_step
+
+
+def main():
+
+    # Parse the command-line arguments
+    args = parse_args()
+
+    # Create the environment and the policy
+    env = create_mario_env()
+    obs_shape = env.observation_space.shape
+    act_shape = (len(MARIO_CONTROL),)
+    obs_size = obs_shape[0]
+    action_size = act_shape[0]
+
+    with open(args.policy_path, 'rb') as f:
+        policy = pickle.load(f)
+
+    # os.makedirs(args.eps_path, exist_ok=True)
+    if args.video_path:
+        os.makedirs(args.video_path, exist_ok=True)
+
+    # Collect rollouts
+    for i in range(args.num_episodes):
+        rollout = collect_rollout(
+            env=env,
+            obs_size=obs_size,
+            action_size=action_size,
+            policy=policy,
+            max_steps=args.max_steps,
+            num_history_steps=args.seq_len,
+            action_info_to_action=action_info_to_action_sample,
+            action_to_env_action=action_to_env_action,
+            info_modifier=info_modifier,
+        )
+        print(f'--- rollout {i} {rollout.total_reward}')
+        if args.video_path:
+            imgs = rollout.observations.reshape(-1, 60, 64, 3) * 255
+            imgs = imgs.numpy().clip(0, 255).astype(np.uint8)
+            imgs = add_action_vis(imgs[:-1], rollout.info['action_probs'], (60, 64))
+            print(imgs.shape)
+            vpath = os.path.join(
+                args.video_path,
+                f'test-ep-{i}-reward-{int(rollout.total_reward)}.mp4'
+            )
+            save_video_from_images(
+                images=imgs,
+                video_path=vpath,
+                fps=60,
+            )
+
+
+if __name__ == "__main__":
+    main()

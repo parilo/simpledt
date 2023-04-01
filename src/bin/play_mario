@@ -33,6 +33,7 @@ def parse_args():
     parser.add_argument("--num-episodes", type=int, default=1)
     parser.add_argument("--eps-path", type=str, default="episodes")
     parser.add_argument("--video-path", type=str, default="video")
+    parser.add_argument("--frame-skip", type=int, default=1)
     return parser.parse_args()
 
 
@@ -51,38 +52,38 @@ def action_to_env_action(action: torch.Tensor) -> np.ndarray:
     return action
 
 
-def info_modifier(
-    observation,
-    action_info,
-    reward,
-    terminated_step,
-    truncated_step,
-    info_step
-):
+# def info_modifier(
+#     observation,
+#     action_info,
+#     reward,
+#     terminated_step,
+#     truncated_step,
+#     info_step
+# ):
 
-    # print(f'--- observation {observation.shape}')
-    # img = observation.reshape(240, 256, 3)
-    # img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    # cv2.imshow('mario', img)
-    # cv2.waitKey(3)
+#     # print(f'--- observation {observation.shape}')
+#     # img = observation.reshape(240, 256, 3)
+#     # img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+#     # cv2.imshow('mario', img)
+#     # cv2.waitKey(3)
 
-    # last_action = action_info[0, -1]
-    # info_step['action_vis'] = draw_prob_histogram_on_image(
-    #     probs=torch.softmax(last_action, -1).cpu().numpy(),
-    #     size=(64, 60)
-    # )
-    # info_step['action_bin_min'] = last_action.min().item()
-    # info_step['action_bin_max'] = last_action.max().item()
+#     # last_action = action_info[0, -1]
+#     # info_step['action_vis'] = draw_prob_histogram_on_image(
+#     #     probs=torch.softmax(last_action, -1).cpu().numpy(),
+#     #     size=(64, 60)
+#     # )
+#     # info_step['action_bin_min'] = last_action.min().item()
+#     # info_step['action_bin_max'] = last_action.max().item()
 
-    img = observation.reshape(240, 256, 3)
-    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+#     img = observation.reshape(240, 256, 3)
+#     img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
 
-    _, jpeg_bytes = cv2.imencode('.jpg', img, [cv2.IMWRITE_JPEG_QUALITY, 95])
-    jpeg_data = np.frombuffer(jpeg_bytes.tobytes(), dtype=np.uint8)
-    info_step['obs_jpeg_len'] = len(jpeg_data)
-    info_step['obs_jpeg'] = torch.as_tensor(jpeg_data, dtype=torch.uint8)
+#     _, jpeg_bytes = cv2.imencode('.jpg', img, [cv2.IMWRITE_JPEG_QUALITY, 95])
+#     jpeg_data = np.frombuffer(jpeg_bytes.tobytes(), dtype=np.uint8)
+#     info_step['obs_jpeg_len'] = len(jpeg_data)
+#     info_step['obs_jpeg'] = torch.as_tensor(jpeg_data, dtype=torch.uint8)
 
-    return observation, action_info, reward, terminated_step, truncated_step, info_step
+#     return observation, action_info, reward, terminated_step, truncated_step, info_step
 
 
 def main():
@@ -114,8 +115,9 @@ def main():
             policy=policy,
             max_steps=args.max_steps,
             num_history_steps=1,
+            frame_skip=args.frame_skip,
             action_to_env_action=action_to_env_action,
-            info_modifier=info_modifier,
+            # info_modifier=info_modifier,
         )
         prev_size = rollout.size
         rollout = trim_rollout(rollout, zero_action)
@@ -137,3 +139,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+#

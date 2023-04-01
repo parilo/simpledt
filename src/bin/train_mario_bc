@@ -34,6 +34,7 @@ def parse_args():
     parser.add_argument("--tb", type=str, default=None)
     parser.add_argument("--device", type=str, default="cpu")
     parser.add_argument("--num-workers", type=int, default=4)
+    parser.add_argument("--seq-len", type=int, default=4)
     return parser.parse_args()
 
 
@@ -42,10 +43,11 @@ def load_jpeg(jpeg_data, jpeg_lens, resize=None) -> torch.Tensor:
     for ind in range(len(jpeg_lens)):
         jpeg_len = int(jpeg_lens[ind])
         img = cv2.imdecode(jpeg_data[ind, :jpeg_len].numpy(), cv2.IMREAD_COLOR)
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         if resize:
             img = cv2.resize(img, resize[::-1])
-        imgs.append(torch.tensor(img).float())
-    imgs_tensor = torch.stack(imgs, dim=0)
+        imgs.append(torch.tensor(img))
+    imgs_tensor = torch.stack(imgs, dim=0).float()
     return imgs_tensor
 
 
@@ -56,7 +58,7 @@ def preproc(rollout: Rollout, start_index: int, end_index: int) -> Tuple[torch.T
         jpeg_data[start_index:end_index],
         jpeg_lens[start_index:end_index],
         resize=(60, 64),
-    )
+    ) / 255
     act = rollout.actions[start_index:end_index]
     return obs.reshape(obs.shape[0], -1), act
 
@@ -70,21 +72,24 @@ def main():
 
     train_dataset = PickledRolloutDataset(
         dirs=[
-            'train-1-5',
+            'mario/train-1-5',
+            'mario/train-2-12',
         ],
-        seq_len=4,
+        seq_len=args.seq_len,
         preprocess=preproc,
     )
+    print('Train data')
     pprint(train_dataset.get_stats())
 
     valid_dataset = PickledRolloutDataset(
         dirs=[
-            'valid-1-1',
-            'valid-1-2',
+            'mario/valid-1-1',
+            'mario/valid-1-2',
         ],
-        seq_len=4,
+        seq_len=args.seq_len,
         preprocess=preproc,
     )
+    print('Valid data')
     pprint(valid_dataset.get_stats())
 
     train_dataloader = torch.utils.data.DataLoader(
@@ -151,6 +156,15 @@ def main():
                 log_dict_to_tensorboard(valid_info, train_step, tb)
                 print(train_step, train_info, valid_info)
 
+                policy_output = policy(
+                    observations=batch.observations,
+                    actions=batch.actions[:, :-1],
+                )
+                next_actions = torch.softmax(policy_output[:, ::2], -1)
+                torch.set_printoptions(sci_mode=False)
+                print(batch.actions[:2])
+                print(next_actions[:2])
+
             if args.save_dir and train_step % args.save_every == 0:
                 policy_path = os.path.join(args.save_dir, f'policy-{train_step}.pkl')
                 with open(policy_path, 'wb') as f:
@@ -163,4 +177,4 @@ if __name__ == "__main__":
     main()
 
 
-#
+# python src/bin/train_mario_bc --num-epochs 1000 --num-train-ops-per-epoch 1000 --tb-log-every 10 --valid-every 10 --save-dir mario/save-no-act --save-every 1000 --batch-size 256 --tb mario/tb-no-act --device cuda:0 --num-workers 8 --hidden-size 256 --num-layers 2 --nhead 2 --dim-feedforward 1024

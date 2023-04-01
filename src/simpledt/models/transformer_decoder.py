@@ -18,7 +18,7 @@ def generate_square_subsequent_mask(size: int, diagonal: int) -> torch.Tensor:
 #     return mask
 
 
-def concatenate_obs_act(obs: torch.Tensor, act: torch.Tensor) -> torch.Tensor:
+def arrange_obs_act(obs: torch.Tensor, act: torch.Tensor) -> torch.Tensor:
     """
     Concatenates the observation and action tensors into a single tensor of the form
     [obs1, act1, obs2, act2, ..., obsN].
@@ -154,8 +154,8 @@ class TransformerDecoderPolicy(nn.Module):
 
         # Make tokens
         obs_tok = self.input_fc(observations)
-        act_tok = self.action_fc(actions)
-        tgt_tok = concatenate_obs_act(obs_tok, act_tok)
+        act_tok = torch.zeros_like(self.action_fc(actions))
+        tgt_tok = arrange_obs_act(obs_tok, act_tok)
 
         batch_size = observations.shape[0]
         seq_len = observations.shape[1]
