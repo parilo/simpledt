@@ -7,26 +7,23 @@ import gymnasium as gym
 import cv2
 import numpy as np
 
-from typing import Any, List, Optional, Tuple
-
 import torch
-from torch.utils.tensorboard import SummaryWriter
-from simpledt.cem_optimizer import get_best_n_rollouts_list
-from simpledt.cem_optimizer_transformer import TransformerCEMOptimizer
 from simpledt.collect2 import collect_rollout
 from simpledt.keyboard_policy import MARIO_CONTROL, MarioKeyboardPolicy
-from simpledt.models.transformer_decoder import TransformerDecoderPolicy
-from simpledt.replay_buffer import ReplayBuffer
 from simpledt.save_video import save_video_from_images
 from simpledt.wrappers.flatten_obs_wrapper import FlattenImageObservationWrapper
 from simpledt.wrappers.frame_skip_wrapper import FrameSkipWrapper
-from simpledt.wrappers.resize_obs_wrapper import ResizeObservationWrapper
-from simpledt.wrappers.scale_obs_wrapper import ScaleObservationWrapper
 
-from simpledt.rollout import Rollout, trim_rollout
-from simpledt.tb import log_dict_to_tensorboard
+from simpledt.rollout import trim_rollout
 from simpledt.wrappers.sleep_wrapper import SleepWrapper
-from simpledt.zmq_workers_pool import WorkerPool
+
+
+"""
+https://pypi.org/project/gym-super-mario-bros/
+SuperMarioBros-<world>-<stage>-v<version>
+<world> is a number in {1, 2, 3, 4, 5, 6, 7, 8} indicating the world
+<stage> is a number in {1, 2, 3, 4} indicating the stage within a world
+"""
 
 
 def parse_args():
@@ -36,14 +33,15 @@ def parse_args():
     parser.add_argument("--eps-path", type=str, default="episodes")
     parser.add_argument("--video-path", type=str, default="video")
     parser.add_argument("--frame-skip", type=int, default=1)
+    parser.add_argument("--level", type=str, default="1-1")
     return parser.parse_args()
 
 
-def create_mario_env(frame_skip: int) -> gym.Env:
+def create_mario_env(level: str, frame_skip: int) -> gym.Env:
     from nes_py.wrappers import JoypadSpace
     import gym_super_mario_bros
 
-    env = gym_super_mario_bros.make("SuperMarioBros-1-1-v0")
+    env = gym_super_mario_bros.make(f"SuperMarioBros-{level}-v0")
     env = FlattenImageObservationWrapper(env)
     env = FrameSkipWrapper(env, frame_skip)
     env = SleepWrapper(env, dt=0.025)
@@ -56,47 +54,13 @@ def action_to_env_action(action: torch.Tensor) -> np.ndarray:
     return action
 
 
-# def info_modifier(
-#     observation,
-#     action_info,
-#     reward,
-#     terminated_step,
-#     truncated_step,
-#     info_step
-# ):
-
-#     # print(f'--- observation {observation.shape}')
-#     # img = observation.reshape(240, 256, 3)
-#     # img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-#     # cv2.imshow('mario', img)
-#     # cv2.waitKey(3)
-
-#     # last_action = action_info[0, -1]
-#     # info_step['action_vis'] = draw_prob_histogram_on_image(
-#     #     probs=torch.softmax(last_action, -1).cpu().numpy(),
-#     #     size=(64, 60)
-#     # )
-#     # info_step['action_bin_min'] = last_action.min().item()
-#     # info_step['action_bin_max'] = last_action.max().item()
-
-#     img = observation.reshape(240, 256, 3)
-#     img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-
-#     _, jpeg_bytes = cv2.imencode('.jpg', img, [cv2.IMWRITE_JPEG_QUALITY, 95])
-#     jpeg_data = np.frombuffer(jpeg_bytes.tobytes(), dtype=np.uint8)
-#     info_step['obs_jpeg_len'] = len(jpeg_data)
-#     info_step['obs_jpeg'] = torch.as_tensor(jpeg_data, dtype=torch.uint8)
-
-#     return observation, action_info, reward, terminated_step, truncated_step, info_step
-
-
 def main():
 
     # Parse the command-line arguments
     args = parse_args()
 
     # Create the environment and the policy
-    env = create_mario_env(args.frame_skip)
+    env = create_mario_env(args.level, args.frame_skip)
     obs_shape = env.observation_space.shape
     act_shape = (len(MARIO_CONTROL),)
     obs_size = obs_shape[0]
@@ -131,10 +95,7 @@ def main():
             save_video_from_images(imgs, video_path, 30)
 
             ep_path = os.path.join(args.eps_path, f'episode-{i}.pkl')
-            rollout.observations = None
-            # print('asdasd', rollout.info['obs_jpeg'].dtype)
-            # for key, val in rollout.info.items():
-            #     print(key, val.shape)
+            rollout.observations = rollout.observations.numpy().astype(np.uint8)
             with open(ep_path, 'wb') as f:
                 pickle.dump(rollout, f)
 
@@ -144,4 +105,38 @@ if __name__ == "__main__":
     main()
 
 
-#
+# python src/bin/play_mario --max-steps 4000 --num-episodes 50 --eps-path train --video-path valid-1 --frame-skip 3 --level 1-1
+
+
+# def info_modifier(
+#     observation,
+#     action_info,
+#     reward,
+#     terminated_step,
+#     truncated_step,
+#     info_step
+# ):
+
+#     # print(f'--- observation {observation.shape}')
+#     # img = observation.reshape(240, 256, 3)
+#     # img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+#     # cv2.imshow('mario', img)
+#     # cv2.waitKey(3)
+
+#     # last_action = action_info[0, -1]
+#     # info_step['action_vis'] = draw_prob_histogram_on_image(
+#     #     probs=torch.softmax(last_action, -1).cpu().numpy(),
+#     #     size=(64, 60)
+#     # )
+#     # info_step['action_bin_min'] = last_action.min().item()
+#     # info_step['action_bin_max'] = last_action.max().item()
+
+#     img = observation.reshape(240, 256, 3)
+#     img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+
+#     _, jpeg_bytes = cv2.imencode('.jpg', img, [cv2.IMWRITE_JPEG_QUALITY, 95])
+#     jpeg_data = np.frombuffer(jpeg_bytes.tobytes(), dtype=np.uint8)
+#     info_step['obs_jpeg_len'] = len(jpeg_data)
+#     info_step['obs_jpeg'] = torch.as_tensor(jpeg_data, dtype=torch.uint8)
+
+#     return observation, action_info, reward, terminated_step, truncated_step, info_step
